@@ -1,4 +1,5 @@
 import os
+import time
 import bisect
 import numpy as np
 
@@ -12,16 +13,18 @@ event_list = []
 
 class TransitLine:
 
-    def __init__(self, config_dir, output_dir):
+    def __init__(self):
         """
         this is the constructor for the transit line class
-        :param config_dir: directory of configuration files
-        :param output_dir: directory of output files
+        relevant directories are set
+        everything else starts as None
         """
 
+        print('Status: Initializing TransitLine ...')
+
         # save directories in class
-        self._config_dir = config_dir
-        self._output_dir = output_dir
+        self._config_dir = '{0}/../config/'.format(os.path.dirname(os.path.realpath(__file__)))
+        self._output_dir = '{0}/../output/'.format(os.path.dirname(os.path.realpath(__file__)))
 
         # configuration files and output files are not loaded yet
         self._stops_config_file = None
@@ -29,13 +32,17 @@ class TransitLine:
         self._output_file = None
 
         # stops and buses list
+        self._max_clk = None
         self._stops = None
         self._buses = None
 
-    def simulate(self, rep_id):
+    def simulate(self, rep_id, max_clk, save_bus=False, save_stop=False):
         """
         this function runs the simulation
         :param rep_id: replication id
+        :param max_clk: max clock time of this simulation
+        :param save_bus: boolean to write bus simulation output in output file
+        :param save_stop: boolean to write stop simulation output in output file
         :return:
         """
 
@@ -44,46 +51,71 @@ class TransitLine:
         self._buses_config_file = '{0}rep{1}_buses.txt'.format(self._config_dir, rep_id)
         self._output_file = '{0}rep{1}_output.txt'.format(self._output_dir, rep_id)
 
+        # set max clock time
+        self._max_clk = max_clk
+
+        # parse configuration files
+        self._parse_config_files()
+
         # run simulation
-        self._simulate()
+        self._simulate(rep_id, save_bus, save_stop)
 
         # reset class
         self._reset_class()
 
-    def _simulate(self):
+    def _simulate(self, rep_id, save_bus, save_stop):
+
+        print('Status: Simulating rep{0} ...'.format(rep_id))
+        time0 = time.time()
 
         global clk
         global t_list
         global event_list
 
         # build output file if it does not yet exist
-        if not os.path.exists(self._output_file):
-            os.makedirs(self._output_file)
+        if not os.path.exists(self._output_dir):
+            os.makedirs(self._output_dir)
 
-        with open(self._output_file, 'w') as output_file:
+        with open(self._output_file, 'w+') as output_file:
             ent = 0
             while t_list and event_list:
+
+                # if the next event is beyond max clock time, end simulation
+                if t_list[0] > self._max_clk:
+                    break
 
                 # update clock time
                 clk = t_list[0]
 
-                if isinstance(event_list[0], Stop):
-                    event_list[0].run_pax_arrival()
-                elif isinstance(event_list[0], Bus):
+                if isinstance(event_list[0], Stop) and save_stop:
+                    event_type = 3
+                    stop_id, stop_pax = event_list[0].run_pax_arrival()
+                    bus_id = ''
+                    bus_type = ''
+                    bus_pax = ''
+                elif isinstance(event_list[0], Bus) and save_bus:
                     pass
 
-                output_file.write(ent)
+                line = '{0},{1:.2f},{2},{3},{4},{5},{6},{7}\n'.format(ent, clk, event_type, stop_id,
+                                                                  stop_pax, bus_id, bus_type, bus_pax)
+                output_file.write(line)
                 ent += 1
 
                 t_list.pop(0)
                 event_list.pop(0)
+
+        time1 = time.time()
+        print('Status: Finished simulating rep{0} ...'.format(rep_id))
+        print('        Elapsed time -- {0:.2f} s'.format(time1 - time0))
 
     def _reset_class(self):
         """
         this function resets the class attributes
         :return:
         """
+
         print('Status: Resetting class ...')
+
         # reset class attributes
         self._stops_config_file = None
         self._buses_config_file = None
@@ -100,7 +132,8 @@ class TransitLine:
         print('Status: Parsing configuration files ...')
 
         if not os.path.exists(self._stops_config_file) or not os.path.exists(self._buses_config_file):
-            raise Exception('Configuration file is missing ...')
+            print(self._stops_config_file)
+            raise Exception('At least one configuration file is missing ...')
 
         # build stops list
         print('        Building stops ...')
@@ -158,9 +191,13 @@ class Stop:
         # this is the alight demand of the subsequent stations coming from the current stations
         # note that self._board_demand MUST be equal to sum(self._subseq_alight_demand)
         # converted from [pax/hr] to [pax/s]
-        subseq_alight_demand = [float(i)/3600 for i in stop_data[3].strip("[]").split(',')]
+        subseq_alight_demand = []
+        for i in stop_data[3].strip('\n').strip('[]').split(','):
+            if i:
+                subseq_alight_demand.append(float(i)/3600)
         sum_subseq = sum(subseq_alight_demand)
         num_subseq = len(subseq_alight_demand)
+
         # this is the probability of a passenger going to each of the subsequent stops
         self._subseq_alight_probs = [i/sum_subseq for i in subseq_alight_demand]
         self._subseq_stop_ids = [self._stop_id + i for i in range(1, num_subseq + 1)]
@@ -168,15 +205,20 @@ class Stop:
         # the stop starts with no pax
         self._pax = []  # will hold instances of pax class
 
+        # FOR DEBUG
+        self.schedule_pax_arrival()
+
     def schedule_pax_arrival(self):
         """
         this function schedules the next passenger arrival by inserting in t_list and event_list
         :return:
         """
-        t = np.random.exponential(1/self._board_demand)
-        idx = bisect.bisect_left(t_list, clk + t)
-        t_list.insert(idx, clk + t)
-        event_list.insert(idx, self)
+
+        if self._board_demand:
+            t = np.random.exponential(1/self._board_demand)
+            idx = bisect.bisect_left(t_list, clk + t)
+            t_list.insert(idx, clk + t)
+            event_list.insert(idx, self)
 
     def run_pax_arrival(self):
         """
@@ -191,6 +233,8 @@ class Stop:
 
         # schedule next passenger arrival
         self.schedule_pax_arrival()
+
+        return self._stop_id, len(self._pax)
 
 
 class Pax:
