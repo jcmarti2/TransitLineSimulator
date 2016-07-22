@@ -9,6 +9,8 @@ __author__ = 'Juan Carlos Martinez Mori'
 clk = 0
 t_list = []
 event_list = []
+stops = {}
+buses = {}
 
 
 class TransitLine:
@@ -61,7 +63,7 @@ class TransitLine:
         self._simulate(rep_id, save_bus, save_stop)
 
         # reset class
-        self._reset_class()
+        self._reset_simulator()
 
     def _simulate(self, rep_id, save_bus, save_stop):
 
@@ -77,7 +79,19 @@ class TransitLine:
             os.makedirs(self._output_dir)
 
         with open(self._output_file, 'w+') as output_file:
-            ent = 0
+            ent = 0  # output entry counter
+
+            # initialize simulation
+            self._initialize()
+            event_type = 1
+            stop_id, stop_pax = '', ''
+            bus_id, bus_type, bus_pax = '', '', ''
+            line = '{0},{1:.2f},{2},{3},{4},{5},{6},{7}\n'.format(ent, clk, event_type, stop_id,
+                                                                  stop_pax, bus_id, bus_type, bus_pax)
+            output_file.write(line)
+            ent += 1
+
+            print('        Running ...')
             while t_list and event_list:
 
                 # if the next event is beyond max clock time, end simulation
@@ -87,41 +101,69 @@ class TransitLine:
                 # update clock time
                 clk = t_list[0]
 
-                if isinstance(event_list[0], Stop) and save_stop:
+                # event type is passenger arrival
+                if isinstance(event_list[0], Stop):
                     event_type = 3
                     stop_id, stop_pax = event_list[0].run_pax_arrival()
-                    bus_id = ''
-                    bus_type = ''
-                    bus_pax = ''
-                elif isinstance(event_list[0], Bus) and save_bus:
-                    pass
+                    if save_stop:
+                        bus_id, bus_type, bus_pax = '', '', ''
+                        line = '{0},{1:.2f},{2},{3},{4},{5},{6},{7}\n'.format(ent, clk, event_type, stop_id,
+                                                                              stop_pax, bus_id, bus_type, bus_pax)
+                        output_file.write(line)
 
-                line = '{0},{1:.2f},{2},{3},{4},{5},{6},{7}\n'.format(ent, clk, event_type, stop_id,
-                                                                  stop_pax, bus_id, bus_type, bus_pax)
-                output_file.write(line)
-                ent += 1
+                elif isinstance(event_list[0][0], Bus):
 
+                    # event type is bus arrival to stop
+                    if event_list[0][1] == 'arrival':
+                        stop_id, stop_pax, bus_id, bus_type, bus_pax = event_list[0][0].run_arrival()
+                        if save_bus:
+                            line = '{0},{1:.2f},{2},{3},{4},{5},{6},{7}\n'.format(ent, clk, event_type, stop_id,
+                                                                                  stop_pax, bus_id, bus_type, bus_pax)
+                            output_file.write(line)
+
+                    # event type is bus departure from stop
+                    elif event_list[0][1] == 'departure':
+                        stop_id, stop_pax, bus_id, bus_type, bus_pax = event_list[0][0].run_departure()
+                        if save_bus:
+                            line = '{0},{1:.2f},{2},{3},{4},{5},{6},{7}\n'.format(ent, clk, event_type, stop_id,
+                                                                                  stop_pax, bus_id, bus_type, bus_pax)
+                            output_file.write(line)
+
+                # remove first items from t_list and event_list
                 t_list.pop(0)
                 event_list.pop(0)
+
+                ent += 1  # update entry counter
 
         time1 = time.time()
         print('Status: Finished simulating rep{0} ...'.format(rep_id))
         print('        Elapsed time -- {0:.2f} s'.format(time1 - time0))
 
-    def _reset_class(self):
+    def _reset_simulator(self):
         """
         this function resets the class attributes
         :return:
         """
 
-        print('Status: Resetting class ...')
+        print('Status: Resetting simulator ...')
+
+        global clk
+        global t_list
+        global event_list
+        global stops
+        global buses
 
         # reset class attributes
         self._stops_config_file = None
         self._buses_config_file = None
         self._result_file = None
         self._timetable = None
-        self._stops = None
+
+        clk = 0
+        t_list = []
+        event_list = []
+        stops = {}
+        buses = {}
 
     def _parse_config_files(self):
         """
@@ -137,21 +179,34 @@ class TransitLine:
 
         # build stops list
         print('        Building stops ...')
-        self._stops = []
         with open(self._stops_config_file, 'r') as stops_config_file:
             for stop_data in stops_config_file:
                 stop_data = [i for i in stop_data.split(';')]
                 # construct a Stop instance and append to stops list
-                self._stops.append(Stop(stop_data))
+                stops[stop_data[0]] = Stop(stop_data)
 
         # build buses list
         print('        Building buses ...')
-        self._stops = []
         with open(self._buses_config_file, 'r') as buses_config_file:
             for bus_data in buses_config_file:
                 bus_data = [i for i in bus_data.split(';')]
                 # construct a Bus instance and append to buses list
-                self._buses.append(Bus(bus_data))
+                buses[bus_data[0]] = Bus(bus_data)
+
+    def _initialize(self):
+        """
+        this function initializes the simulation events
+        :return:
+        """
+
+        global clk
+        global t_list
+        global event_list
+
+        print('        Initializing ...')
+
+        for bus in self._buses:
+            bus.schedule_departure()
 
 
 class Bus:
@@ -159,20 +214,142 @@ class Bus:
     def __init__(self, bus_data):
         """
         this is the constructor for the bus class
-        :param bus_data: list holding bus data [bus_id, bus_capacity, cruise_speed, acc_rate]
+        :param bus_data: list holding bus data [bus_id, bus_capacity, mean_cruise_speed, cv_cruise_speed, acc_rate
+                                                cv_acc_rate, stop_list, stop_slack, departure_time]
         """
 
         self._bus_id = int(bus_data[0])  # int
         self._bus_capacity = int(bus_data[1])  # int
-        self._cruise_speed = float(bus_data[2])/3.6  # converted from [km/h] to [m/s]
-        self._acc_rate = float(bus_data[3])  # [m/s^2]
+
+        # this section uses bus_data[2] and bus_data[3]
+        # cruise speed random distribution
+        mean_cruise_speed = float(bus_data[2])/3.6  # converted from [km/h] to [m/s]
+        std_cruise_speed = mean_cruise_speed*float(bus_data[3])
+        # obtain mean and std of associated normal distribution for the lognormal distributions of speed using
+        # mu = log((m^2)/sqrt(v+m^2)) and sigma = sqrt(log(v/(m^2)+1))
+        # [m/s]
+        self._mu_cruise_speed = np.log(
+            (mean_cruise_speed ** 2) / np.sqrt(std_cruise_speed ** 2 + mean_cruise_speed ** 2))
+        self._sigma_cruise_speed = np.sqrt(np.log((std_cruise_speed ** 2) / (mean_cruise_speed ** 2) + 1))
+
+        # this section uses bus_data[4] and bus_data[6]
+        # acceleration rate random distribution
+        mean_acc_rate = float(bus_data[4])  # [m/s^2]
+        std_acc_rate = mean_acc_rate*float(bus_data[5])
+        # obtain mean and std of associated normal distribution for the lognormal distributions of acc rate using
+        # mu = log((m^2)/sqrt(v+m^2)) and sigma = sqrt(log(v/(m^2)+1))
+        # [m/s^2]
+        self._mu_acc_rate = np.log((mean_acc_rate ** 2) / np.sqrt(std_acc_rate ** 2 + mean_acc_rate ** 2))
+        self._sigma_acc_rate = np.sqrt(np.log((std_acc_rate ** 2) / (mean_acc_rate ** 2) + 1))
+
+        # this section uses bus_data[6]
+        # generate stop list for this bus
+        self._stop_list = []
+        for i in bus_data[6].strip('\n').strip('[]').split(','):
+            if i:
+                self._stop_list.append(int(i))
+        if not self._stop_list:
+            raise Exception('A bus was generated without a stop list ...')
+
+        # this section uses bus_data[7]
+        # generate stop list for this bus
+        self._stop_slack = []
+        for i in bus_data[7].strip('\n').strip('[]').split(','):
+            if i:
+                self._stop_slack.append(float(i))
+        if not self._stop_list:
+            raise Exception('A bus was generated without a defined stop slack ...')
+
+        # save departure time
+        self._start_time = bus_data[8]
+
+        # attribute to keep track of current stop index
+        self._stop_idx = -1
 
         # the bus starts with zero passengers
-        self._num_pax = 0  # int
+        self._pax_lists = {}
+        self._num_pax = 0
 
         # timetables
-        self.__arr_timetable = []
+        self._arr_timetable = []
         self._dept_timetable = []
+
+    def schedule_arrival(self):
+        """
+        this function schedules a bus arrival to a stop
+        if the bus has just been put in service, arrival time to stop is start time
+        else, compute random variable based on distance to next stop
+        :return:
+        """
+
+        global clk
+        global t_list
+        global event_list
+
+        # is bus was just put in service
+        if self._stop_idx < 0:
+            t = self._start_time
+        else:
+            v = np.random.lognormal(self._mu_cruise_speed, self._sigma_cruise_speed)  # [m/s]
+            a = np.random.lognormal(self._mu_acc_rate, self._sigma_acc_rate)  # [m/s^2]
+            s = self._stop_list[self._stop_idx + 1].abs_dist - self._stop_list[self._stop_idx].abs_dist  # [m]
+            # if spacing allows for cruise speed
+            if s >= (v**2) / (2*a):
+                acc_s = (v**2) / (2*a)  # [m]
+                cruise_s = s - (v**2) / (2*a)  # [m]
+                t = cruise_s/v + (2/(2**0.5))*((acc_s/a)**0.5)  # [s]
+            # if spacing does not allow for cruise speed
+            else:
+                t = (2/(2**0.5))*((s/a)**0.5)  # [s]
+
+        idx = bisect.bisect_left(t_list, clk + t)
+        t_list.insert(idx, clk + t)
+        event_list.insert(idx, [self, 'arrival'])
+
+    def schedule_departure(self, num_pax_off, num_pax_on):
+
+        # TODO: set time according to pax alighting and boarding and timetable
+
+        global clk
+        global t_list
+        global event_list
+
+        t = num_pax_off
+
+        idx = bisect.bisect_left(t_list, clk)
+        t_list.insert(idx, clk)
+        event_list.insert(idx, [self, 'departure'])
+
+    def _build_timetable(self):
+        self._arr_timetable = []
+        self._dept_timetable = []
+
+    def run_arrival(self):
+
+        global stops
+
+        # update stop idx
+        self._stop_idx += 1
+        num_pax_off = len(self._pax_lists[self._stop_idx])
+        self._num_pax -= num_pax_off
+        self._pax_lists[self._stop_idx] = []
+
+        on_pax = stops[self._stop_idx]
+        num_pax_on = 0
+        for pax in on_pax:
+            if self._num_pax < self._bus_capacity:
+                # let new passenger board
+                num_pax_on += 1
+                self._num_pax += 1
+                self._pax_lists[pax.destination].append(pax)
+            else:
+                break
+
+        self.schedule_departure(num_pax_off, num_pax_on)
+
+    def run_departure(self):
+
+        self.schedule_arrival()
 
 
 class Stop:
@@ -194,11 +371,12 @@ class Stop:
         subseq_alight_demand = []
         for i in stop_data[3].strip('\n').strip('[]').split(','):
             if i:
-                subseq_alight_demand.append(float(i)/3600)
+                subseq_alight_demand.append(float(i)/3600)  # applying conversion factor
         sum_subseq = sum(subseq_alight_demand)
         num_subseq = len(subseq_alight_demand)
 
         # this is the probability of a passenger going to each of the subsequent stops
+        # if subset_alight_demand is [], these are also []
         self._subseq_alight_probs = [i/sum_subseq for i in subseq_alight_demand]
         self._subseq_stop_ids = [self._stop_id + i for i in range(1, num_subseq + 1)]
 
@@ -208,12 +386,29 @@ class Stop:
         # FOR DEBUG
         self.schedule_pax_arrival()
 
+    @property
+    def stop_id(self):
+        return self._stop_id
+
+    @property
+    def abs_dist(self):
+        return self._abs_dist
+
+    @property
+    def pax(self):
+        return self._pax
+
     def schedule_pax_arrival(self):
         """
         this function schedules the next passenger arrival by inserting in t_list and event_list
         :return:
         """
 
+        global clk
+        global t_list
+        global event_list
+
+        # schedule pax arrival only if there is demand
         if self._board_demand:
             t = np.random.exponential(1/self._board_demand)
             idx = bisect.bisect_left(t_list, clk + t)
@@ -223,7 +418,8 @@ class Stop:
     def run_pax_arrival(self):
         """
         this function inserts one pax and schedules next pax arrival
-        :return:
+        :return self._stop_id: stop id
+        :return len(self._pax): number of pax in the stop
         """
         # compute destination station
         destination = np.random.choice(self._subseq_stop_ids, p=self._subseq_alight_probs)
@@ -247,4 +443,12 @@ class Pax:
         """
         self._origin = origin
         self._destination = destination
+
+    @property
+    def origin(self):
+        return self._origin
+
+    @property
+    def destination(self):
+        return self._destination
 
