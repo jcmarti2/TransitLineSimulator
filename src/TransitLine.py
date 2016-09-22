@@ -6,22 +6,28 @@ import numpy as np
 __author__ = 'Juan Carlos Martinez Mori'
 
 
-clk = 0  # simulation clock time [s]
-t_list = []  # event time list
-event_list = []  # event list
-stop_ids_list = []  # list of stop ids in order of route
-stops = {}  # dictionary holding stops
-bus_ids_list = []  # bus list in order of deployment
-buses = {}  # dictionary of buses
-headway = None  # time between bus deployments [s]
-pax_board_t = None  # boarding time per pax [s]
-pax_alight_t = None  # alighting time per pax [s]
-bunch_threshold = None  # time threshold for bunching detection based on delay [s]
+clk = 0.0                        # simulation clock time [s]
+t_list = []                      # event time list
+event_list = []                  # event list
+stop_ids_list = []               # list of stop ids in order of route
+stops = {}                       # dictionary holding stops
+bus_ids_list = []                # bus list in order of deployment
+buses = {}                       # dictionary of buses
+headway = None                   # time between bus deployments [s]
+pax_board_t = None               # boarding time per pax [s]
+pax_alight_t = None              # alighting time per pax [s]
+scheduled_bus_units = []         # list containing the scheduled bus unit ids (may be recycled)
+num_scheduled_bus_units = 0      # latest number of buses that have been released
+added_bus_units = []             # list containing the added bus unit ids (may be recycled)
+num_added_bus_units = 0          # latest number of bus units that have been added
+num_added_bus_runs = 0           # number of added bus runs (not physical unit), for added bus id
+bunch_threshold = None           # time threshold for bunching detection based on delay [s]
 bus_addition_stops_ahead = None  # int number of stops ahead of delayed bus where bus is inserted [] >= 1
 
 # TODO: TAKE CARE OF PAX THAT ARRIVE WHILE BOARDING HAPPENS
 # TODO: DESIGN AND IMPLEMENT BUS INSERTION
 # TODO: BUS RECYCLING AND RETIRING
+# TODO: DOUBLE CHECK LOG NORMAL DISTRIBUTION FITTING
 
 
 class TransitLine:
@@ -45,7 +51,7 @@ class TransitLine:
         self._buses_config_file = None
         self._output_file = None
 
-        # max clock time of this simulation
+        # max clock time of this simulation replication
         self._max_clk = None
 
     def simulate(self, rep_id, save_bus=False, save_stop=False):
@@ -101,11 +107,12 @@ class TransitLine:
         with open(self._rep_config_file) as rep_config_file:
             for rep_data in rep_config_file:  # iteration should happen only once in this file
                 rep_data = [i for i in rep_data.split(';')]
-                self._max_clk = float(rep_data[0])  # max clock time
-                headway = float(rep_data[1])  # bus time headway
-                pax_board_t = float(rep_data[2])  # boarding time per pax
-                pax_alight_t = float(rep_data[3])  # alighting time per pax
-                bunch_threshold = float(rep_data[4])  # delay threshold for bus addition trigger > 0
+                # param extraction
+                self._max_clk = float(rep_data[0])           # max clock time
+                headway = float(rep_data[1])                 # bus time headway
+                pax_board_t = float(rep_data[2])             # boarding time per pax
+                pax_alight_t = float(rep_data[3])            # alighting time per pax
+                bunch_threshold = float(rep_data[4])         # delay threshold for bus addition trigger > 0
                 bus_addition_stops_ahead = int(rep_data[5])  # number of stops ahead for bus insertion >= 1
 
         # build stops list
@@ -116,12 +123,12 @@ class TransitLine:
                 stop_ids_list.append(stop_data[0])  # keep track of stop_ids in the order of appearance
                 # construct a Stop instance and add to stops dictionary
                 stops[stop_data[0]] = Stop(stop_data)
-        # iterate over every stop for global demand data storage
+        # iterate over every stop for global alight demand storage
         for stop_id in stop_ids_list:
             # get subsequent alight demands and update alight demands of corresponding stops
             curr_subseq_alight_demand = stops[stop_id].subseq_alight_demand
             curr_subseq_stop_ids = stops[stop_id].subseq_stop_ids
-            for idx in range(0, len(curr_subseq_stop_ids)):
+            for idx in range(0, len(curr_subseq_stop_ids)):  # iterate over curr_subseq stops and add demand
                 stops[curr_subseq_stop_ids[idx]].alight_demand += curr_subseq_alight_demand[idx]
 
         # build buses list
@@ -163,7 +170,7 @@ class TransitLine:
             ent += 1
 
             print('        Running ...')
-            while t_list and event_list:
+            while t_list and event_list:  # this is not empty after simulation initialization
 
                 # terminating condition. if the next event is beyond max clock time, end simulation
                 if t_list[0] > self._max_clk:
@@ -176,9 +183,9 @@ class TransitLine:
                 if isinstance(event_list[0], Stop):
                     event_type = 3  # pax arrival event type
                     event_list[0].run_pax_arrival()
-                    stop_id = event_list[0].stop_id
-                    stop_pax = event_list[0].num_pax
                     if save_stop:
+                        stop_id = event_list[0].stop_id
+                        stop_pax = event_list[0].num_pax
                         bus_id, bus_type, bus_pax = '', '', ''
                         line = '{0},{1:.2f},{2},{3},{4},{5},{6},{7}\n'.format(ent, clk, event_type, stop_id,
                                                                               stop_pax, bus_id, bus_type, bus_pax)
@@ -227,31 +234,46 @@ class TransitLine:
         global t_list
         global event_list
         global stop_ids_list
+        global stops
         global bus_ids_list
+        global buses
         global headway
 
+        print('        Simulation will end at clock time: {0} ...'.format(self._max_clk))
         print('        Initializing ...')
 
-        # initialize stop operations
-        warmup_timetable = buses[bus_ids_list[0]].arr_timetable
+        # initialize pax arrivals at each stop
+        warmup_timetable = buses[bus_ids_list[0]].arr_timetable  # first bus needs to cover all stops
         for stop_idx in range(0, len(stop_ids_list)):
             t = warmup_timetable[stop_idx] - headway
             idx = bisect.bisect_left(t_list, clk + t)  # bisect left because pax arrival has priority
             t_list.insert(idx, clk + t)
-            event_list.insert(idx, self)
+            event_list.insert(idx, stops[stop_idx])  # schedule first pax arrival of stop at stop_idx
 
         # initialize bus dispatch (this is already considering dispatch headway in timetable)
         for bus in buses:
             bus.schedule_arrival()
 
     def _insert_bus(self, late_bus):
-        global clk
 
-        pass
+        global clk
+        global bus_addition_stops_ahead
+
+        if late_bus.stop_idx + bus_addition_stops_ahead < len(late_bus.arr_timetable) - 1:
+            pass
+        else:
+            pass
+
+        # get stop id of bus stop where delay was triggered
+        # handle bus addition in terms of # if stops ahead for addition is larger than stops left in route, pass
+        #   opy_bus.stop_idx + bus_addition_stops_ahead < len(copy_bus.arr_timetable) - 1
+        # with the num stops ahead required, find the stop where new bus should be added
+        # insert new bus (schedule arrival), but there is a need to create a new instance using late bus for copy.
+        # truncate timetable of old bus
 
     def _reset_simulator(self):
         """
-        this function resets the class attributes
+        this function resets the class attributes and the global parameters
         :return:
         """
 
@@ -260,11 +282,20 @@ class TransitLine:
         global clk
         global t_list
         global event_list
+        global stop_ids_list
         global stops
+        global bus_ids_list
         global buses
         global headway
         global pax_board_t
         global pax_alight_t
+        global scheduled_bus_units
+        global num_scheduled_bus_units
+        global added_bus_units
+        global num_added_bus_units
+        global num_added_bus_runs
+        global bunch_threshold
+        global bus_addition_stops_ahead
 
         # reset class attributes
         self._rep_config_file = None
@@ -273,86 +304,126 @@ class TransitLine:
         self._output_file = None
         self._max_clk = None
 
-        clk = 0
+        # reset global param
+        clk = 0.0
         t_list = []
         event_list = []
+        stop_ids_list = []
         stops = {}
+        bus_ids_list = []
         buses = {}
         headway = None
         pax_board_t = None
         pax_alight_t = None
+        scheduled_bus_units = []
+        num_scheduled_bus_units = 0
+        added_bus_units = []
+        num_added_bus_units = 0
+        num_added_bus_runs = 0
+        bunch_threshold = None
+        bus_addition_stops_ahead = None
 
 
 class Bus:
 
-    def __init__(self, bus_data, start_time):
+    def __init__(self, bus_data, start_time, addition=False, copy_bus=None):
         """
         this is the constructor for the bus class
         :param bus_data: list holding bus data [bus_id, bus_capacity, mean_cruise_speed, cv_cruise_speed, acc_rate
                                                 cv_acc_rate, stop_list, stop_slack]
+        :param start_time: scheduled departure time
+        :param addition: boolean to determine whether this is a scheduled or added bus
+        :param copy_bus: bus to be copied from in case this bus is addition=True
         """
 
-        self._bus_id = int(bus_data[0])  # int
-        self._bus_capacity = int(bus_data[1])  # int
-
-        # this section uses bus_data[2] and bus_data[3]
-        # cruise speed random distribution
-        self._mean_cruise_speed = float(bus_data[2])/3.6  # converted from [km/h] to [m/s]
-        std_cruise_speed = self._mean_cruise_speed*float(bus_data[3])
-        # obtain mean and std of associated normal distribution for the lognormal distributions of speed using
-        # mu = log((m^2)/sqrt(v+m^2)) and sigma = sqrt(log(v/(m^2)+1))
-        # [m/s]
-        self._mu_cruise_speed = np.log(
-            (self._mean_cruise_speed ** 2) / np.sqrt(std_cruise_speed ** 2 + self._mean_cruise_speed ** 2))
-        self._sigma_cruise_speed = np.sqrt(np.log((std_cruise_speed ** 2) / (self._mean_cruise_speed ** 2) + 1))
-
-        # this section uses bus_data[4] and bus_data[6]
-        # acceleration rate random distribution
-        self._mean_acc_rate = float(bus_data[4])  # [m/s^2]
-        std_acc_rate = self._mean_acc_rate*float(bus_data[5])
-        # obtain mean and std of associated normal distribution for the lognormal distributions of acc rate using
-        # mu = log((m^2)/sqrt(v+m^2)) and sigma = sqrt(log(v/(m^2)+1))
-        # [m/s^2]
-        self._mu_acc_rate = np.log((self._mean_acc_rate ** 2) / np.sqrt(std_acc_rate ** 2 + self._mean_acc_rate ** 2))
-        self._sigma_acc_rate = np.sqrt(np.log((std_acc_rate ** 2) / (self._mean_acc_rate ** 2) + 1))
-
-        # this section uses bus_data[6]
-        # generate stop list for this bus
-        self._stop_ids_list = []
-        for i in bus_data[6].strip('\n').strip('[]').split(','):
-            if i:
-                self._stop_ids_list.append(int(i))
-        if not self._stop_ids_list:
-            raise Exception('A bus was generated without a stop list ...')
-        self._num_stops = len(self._stop_ids_list)
-
-        # this section uses bus_data[7]
-        # generate stop list slack for this bus
-        self._stop_slack = []
-        for i in bus_data[7].strip('\n').strip('[]').split(','):
-            if i:
-                self._stop_slack.append(float(i))
-        if not self._stop_ids_list:
-            raise Exception('A bus was generated without a defined stop slack ...')
+        global num_added_bus_runs
+        global bus_addition_stops_ahead
 
         # save departure time from dispatch center
         self._start_time = start_time
 
-        # attribute to keep track of current stop index
+        # attribute to keep track of current stop index for this bus
         self._stop_idx = -1
 
         # the bus starts with zero passengers
         self._pax_lists = {}
         self._num_pax = 0
 
-        # set timetables
-        self._build_timetable()
-
         # delay is updated on each event of the bus
         self._delay = 0
 
         # service status
         self._inservice = True
+
+        # this is set once bus starts running based on available units
+        self._unit_id = None  # int of bus unit (actual physical bus) id, for potential recycling
+
+        # if bus was not from a bus addition strategy, read from configuration file
+        self._addition = addition
+        if not self._addition:
+
+            self._bus_id = int(bus_data[0])  # int of bus run id
+            self._bus_capacity = int(bus_data[1])  # int of pax capacity
+
+            # this section uses bus_data[2] and bus_data[3]
+            # cruise speed random distribution
+            self._mean_cruise_speed = float(bus_data[2])/3.6  # converted from [km/h] to [m/s]
+            std_cruise_speed = self._mean_cruise_speed*float(bus_data[3])
+            # obtain mean and std of associated normal distribution for the lognormal distributions of speed using
+            # mu = log((m^2)/sqrt(v+m^2)) and sigma = sqrt(log(v/(m^2)+1))
+            # [m/s]
+            self._mu_cruise_speed = np.log(
+                (self._mean_cruise_speed ** 2) / np.sqrt(std_cruise_speed ** 2 + self._mean_cruise_speed ** 2))
+            self._sigma_cruise_speed = np.sqrt(np.log((std_cruise_speed ** 2) / (self._mean_cruise_speed ** 2) + 1))
+
+            # this section uses bus_data[4] and bus_data[6]
+            # acceleration rate random distribution
+            self._mean_acc_rate = float(bus_data[4])  # [m/s^2]
+            std_acc_rate = self._mean_acc_rate*float(bus_data[5])
+            # obtain mean and std of associated normal distribution for the lognormal distributions of acc rate using
+            # mu = log((m^2)/sqrt(v+m^2)) and sigma = sqrt(log(v/(m^2)+1))
+            # [m/s^2]
+            self._mu_acc_rate = np.log(
+                (self._mean_acc_rate ** 2) / np.sqrt(std_acc_rate ** 2 + self._mean_acc_rate ** 2))
+            self._sigma_acc_rate = np.sqrt(np.log((std_acc_rate ** 2) / (self._mean_acc_rate ** 2) + 1))
+
+            # this section uses bus_data[6]
+            # generate stop list for this bus
+            self._stop_ids_list = []
+            for i in bus_data[6].strip('\n').strip('[]').split(','):
+                if i:
+                    self._stop_ids_list.append(int(i))
+            if not self._stop_ids_list:
+                raise Exception('A bus was generated without a stop list ...')
+            self._num_stops = len(self._stop_ids_list)
+
+            # this section uses bus_data[7]
+            # generate stop list slack for this bus
+            self._stop_slack = []
+            for i in bus_data[7].strip('\n').strip('[]').split(','):
+                if i:
+                    self._stop_slack.append(float(i))
+            if not self._stop_ids_list:
+                raise Exception('A bus was generated without a defined stop slack ...')
+
+            # set timetables
+            self._build_timetable()
+
+        # copy features of delayed bus
+        else:
+
+            self._bus_id = 'a{0}'.format(num_added_bus_units)  # int of bus run id
+
+            self._stop_ids_list = copy_bus.stop_ids_list[copy_bus.stop_idx + bus_addition_stops_ahead:]
+            self._arr_timetable = copy_bus.arr_timetable[copy_bus.stop_idx + bus_addition_stops_ahead:]
+            self._dept_timetable = copy_bus.dept_timetable[copy_bus.stop_idx + bus_addition_stops_ahead:]
+            self._bus_capacity = copy_bus.bus_capacity
+            self._mean_cruise_speed = copy_bus.mean_cruise_speed
+            self._mu_cruise_speed = copy_bus.mu_cruise_speed
+            self._sigma_cruise_speed = copy_bus.sigma_cruise_speed
+            self._mean_acc_rate = copy_bus.mean_acc_rate
+            self._mu_acc_rate = copy_bus.mu_acc_rate
+            self._sigma_acc_rate = copy_bus.sigma_acc_rate
 
     def _build_timetable(self):
         """
@@ -448,6 +519,26 @@ class Bus:
 
         global clk
         global stops
+        global scheduled_bus_units
+        global num_scheduled_bus_units
+        global added_bus_units
+        global num_added_bus_units
+
+        if self._stop_idx < 0:
+            if not self._addition:  # check if this bus is scheduled or added
+                if scheduled_bus_units:  # if there are units available, recycle
+                    self._unit_id = scheduled_bus_units[0]
+                    scheduled_bus_units.pop(0)
+                else:  # generate new unit
+                    num_scheduled_bus_units += 1
+                    self._unit_id = num_scheduled_bus_units
+            else:
+                if added_bus_units:  # if there are addition units avaialable, recycle
+                    self._unit_id = added_bus_units[0]
+                    added_bus_units.pop(0)
+                else:  # generate new unit
+                    num_added_bus_units += 1
+                    self._unit_id = num_added_bus_units
 
         # update stop idx
         self._stop_idx += 1
@@ -482,6 +573,11 @@ class Bus:
         # schedule bus departure from stop based on time it will take for pax to board and alight
         if self._stop_idx < self._num_stops - 1:  # don't schedule departure if it is last stop
             self.schedule_departure(num_pax_off, num_pax_on)
+        else:  # add bus unit to the list of buses available for recycle
+            if not self._added:
+                scheduled_bus_units.append(self._unit_id)
+            else:
+                added_bus_units.append(self._unit_id)
 
     def run_departure(self):
         """
@@ -495,13 +591,48 @@ class Bus:
         self.schedule_arrival()
 
     @property
+    def stop_ids_list(self):
+        return self._stop_ids_list
+
+    @property
     def arr_timetable(self):
         return self._arr_timetable
+
+    @property
+    def dept_timetable(self):
+        return self._dept_timetable
 
     @property
     def delay(self):
         return self._delay
 
+    @property
+    def bus_capacity(self):
+        return self._bus_capacity
+
+    @property
+    def mean_cruise_speed(self):
+        return self._mean_cruise_speed
+
+    @property
+    def mu_cruise_speed(self):
+        return self._mu_cruise_speed
+
+    @property
+    def sigma_cruise_speed(self):
+        return self._sigma_cruise_speed
+
+    @property
+    def mean_acc_rate(self):
+        return self._mean_acc_rate
+
+    @property
+    def mu_acc_rate(self):
+        return self._mu_acc_rate
+
+    @property
+    def sigma_acc_rate(self):
+        return self._sigma_acc_rate
 
 class Stop:
 
