@@ -139,7 +139,8 @@ class TransitLine:
                 bus_data = [i for i in bus_data.split(';')]
                 bus_ids_list.append(bus_data[0])  # keep track of stop_ids in the order of appearance
                 # construct a Bus instance and add to buses dictionary
-                buses[bus_data[0]] = Bus(bus_data, headway*bus_ct)  # scheduled start time is headway * bus number
+                #  scheduled start time is headway * bus number
+                buses[bus_data[0]] = Bus(bus_data=bus_data, start_time=headway*bus_ct)
                 bus_ct += 1
 
     def _simulate(self, rep_id, save_bus, save_stop):
@@ -260,16 +261,10 @@ class TransitLine:
         global bus_addition_stops_ahead
 
         if late_bus.stop_idx + bus_addition_stops_ahead < len(late_bus.arr_timetable) - 1:
+            late_bus.inservice = False
+            Bus(addition=True, copy_bus=late_bus)
+        else:  # if no space for adding a bus
             pass
-        else:
-            pass
-
-        # get stop id of bus stop where delay was triggered
-        # handle bus addition in terms of # if stops ahead for addition is larger than stops left in route, pass
-        #   opy_bus.stop_idx + bus_addition_stops_ahead < len(copy_bus.arr_timetable) - 1
-        # with the num stops ahead required, find the stop where new bus should be added
-        # insert new bus (schedule arrival), but there is a need to create a new instance using late bus for copy.
-        # truncate timetable of old bus
 
     def _reset_simulator(self):
         """
@@ -326,7 +321,7 @@ class TransitLine:
 
 class Bus:
 
-    def __init__(self, bus_data, start_time, addition=False, copy_bus=None):
+    def __init__(self, bus_data=None, start_time=None, addition=False, copy_bus=None):
         """
         this is the constructor for the bus class
         :param bus_data: list holding bus data [bus_id, bus_capacity, mean_cruise_speed, cv_cruise_speed, acc_rate
@@ -338,9 +333,6 @@ class Bus:
 
         global num_added_bus_runs
         global bus_addition_stops_ahead
-
-        # save departure time from dispatch center
-        self._start_time = start_time
 
         # attribute to keep track of current stop index for this bus
         self._stop_idx = -1
@@ -364,6 +356,9 @@ class Bus:
 
             self._bus_id = int(bus_data[0])  # int of bus run id
             self._bus_capacity = int(bus_data[1])  # int of pax capacity
+
+            # save departure time from dispatch center
+            self._start_time = start_time
 
             # this section uses bus_data[2] and bus_data[3]
             # cruise speed random distribution
@@ -413,7 +408,10 @@ class Bus:
         else:
 
             self._bus_id = 'a{0}'.format(num_added_bus_units)  # int of bus run id
+            self._unit_id = None  # set when bus is deployed
+            self._start_time = copy_bus.arr_timetable[copy_bus.stop_idx + bus_addition_stops_ahead]
 
+            # timetable is only that left for the delayed bus
             self._stop_ids_list = copy_bus.stop_ids_list[copy_bus.stop_idx + bus_addition_stops_ahead:]
             self._arr_timetable = copy_bus.arr_timetable[copy_bus.stop_idx + bus_addition_stops_ahead:]
             self._dept_timetable = copy_bus.dept_timetable[copy_bus.stop_idx + bus_addition_stops_ahead:]
@@ -574,7 +572,7 @@ class Bus:
         if self._stop_idx < self._num_stops - 1:  # don't schedule departure if it is last stop
             self.schedule_departure(num_pax_off, num_pax_on)
         else:  # add bus unit to the list of buses available for recycle
-            if not self._added:
+            if not self._addition:
                 scheduled_bus_units.append(self._unit_id)
             else:
                 added_bus_units.append(self._unit_id)
@@ -633,6 +631,15 @@ class Bus:
     @property
     def sigma_acc_rate(self):
         return self._sigma_acc_rate
+
+    @property
+    def inservice(self):
+        return self._inservice
+
+    @inservice.setter
+    def inservice(self, status):
+        self._inservice = status
+
 
 class Stop:
 
@@ -767,4 +774,3 @@ class Pax:
     @property
     def destination_id(self):
         return self._destination_id
-
