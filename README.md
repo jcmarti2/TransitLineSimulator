@@ -1,7 +1,9 @@
 # TransitLineSimulator
+## author
+juan carlos martinez mori
 
 ## about this repository
-this repository contains the TransitLineSimulator
+this repository contains the TransitLineSimulator. to use this package, please refer to the sections
 
 ## directories
 ### /config: this directory contains the simulation configuration files
@@ -43,3 +45,6 @@ in the following descriptions '{0}' denotes the (unique) replication id. the col
 ### /src: this directory contains the simulation source code
   - TransitLine.py: contains simulator
   - simulate_transit_line.py: runs simulator
+
+## disclaimer
+this package is freely available, but please cite when appropriate. note that this package is provided 'as-is'. while i have put significant effort verifying this package, i cannot account for all possible edge cases at this moment.
