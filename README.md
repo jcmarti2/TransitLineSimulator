@@ -40,7 +40,7 @@ in the following descriptions '{0}' denotes the (unique) replication id. the col
     * stop_pax: number of passengers at stop []. ''|stop_pax|stop_pax|stop_pax
     * bus_id: bus id []. ''|bus_id|bus_id|''
     * bus_type: bus type []. ''|bus_type|bus_type|''
-    * bus_pax: number of passengers in bus. ''|bus_pax|bus_pax|''
+    * bus_pax: number of passengers in bus []. ''|bus_pax|bus_pax|''
 
 ### /src: this directory contains the simulation source code
   - TransitLine.py: contains simulator
