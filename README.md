@@ -7,7 +7,7 @@ this repository contains the TransitLineSimulator. to use this package, please r
 
 ## directories
 ### /config: this directory contains the simulation configuration files
-in the following descriptions '{0}' denotes the (unique) replication id. the columns of each file are specified.
+in the following descriptions '{0}' denotes the (unique) replication id. the columns of each file are specified. the files should not contain headers.
   - rep{0}_rep.txt: max_clock_time;headway;pax_board_t;pax_alight_t;bunch_threshold;bus_addition_stops_ahead
     * max_clock_time: maximum simulation clock time [s]
     * headway: time headway between bus departures [s]
