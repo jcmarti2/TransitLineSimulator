@@ -6,6 +6,11 @@ juan carlos martinez mori
 this repository contains the TransitLineSimulator. to use this package, please refer to the sections
 
 ## directories
+### /src: this directory contains the simulation source code
+  - TransitLine.py: contains simulator
+  - simulate_transit_line.py: runs simulator
+  - build_config.py: builds configuration files
+
 ### /config: this directory contains the simulation configuration files
 in the following descriptions '{0}' denotes the (unique) replication id. the columns of each file are specified. the files should not contain headers.
   - rep{0}_rep.txt: max_clk;headway;pax_board_t;pax_alight_t;bunch_threshold;bus_addition_stops_ahead
@@ -41,11 +46,6 @@ in the following descriptions '{0}' denotes the (unique) replication id. the col
     * bus_id: bus id []. ''|bus_id|bus_id|''
     * bus_type: bus type []. ''|bus_type|bus_type|''
     * bus_pax: number of passengers in bus []. ''|bus_pax|bus_pax|''
-
-### /src: this directory contains the simulation source code
-  - TransitLine.py: contains simulator
-  - simulate_transit_line.py: runs simulator
-  - build_config.py: builds configuration files
 
 ## disclaimer
 this package is freely available, but please cite when appropriate. note that this package is provided 'as-is'. while i have put significant effort verifying this package, i cannot account for all possible edge cases at this moment.
