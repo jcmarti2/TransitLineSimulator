@@ -1,7 +1,7 @@
 from TransitLine import TransitLine
 
-__author__ = 'Juan Carlos Martinez Mori'
+__author__ = 'juan carlos martinez mori'
 
 TransitLine = TransitLine()
-TransitLine.simulate(1, 1000, save_stop=True)
+TransitLine.simulate(1, save_stop=True, save_bus=True)
 

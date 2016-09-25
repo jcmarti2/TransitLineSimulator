@@ -1,9 +1,10 @@
 import os
+import sys
 import time
 import bisect
 import numpy as np
 
-__author__ = 'Juan Carlos Martinez Mori'
+__author__ = 'juan carlos martinez mori'
 
 
 clk = 0.0                        # simulation clock time [s]
@@ -103,7 +104,7 @@ class TransitLine:
             raise Exception('At least one configuration file is missing ...')
 
         # build simulator
-        print('        Building simulator ...')
+        print('         - Building simulator ...')
         with open(self._rep_config_file) as rep_config_file:
             for rep_data in rep_config_file:  # iteration should happen only once in this file
                 rep_data = [i for i in rep_data.split(';')]
@@ -116,13 +117,13 @@ class TransitLine:
                 bus_addition_stops_ahead = int(rep_data[5])  # number of stops ahead for bus insertion >= 1
 
         # build stops list
-        print('        Building stops ...')
+        print('         - Building stops ...')
         with open(self._stops_config_file, 'r') as stops_config_file:
             for stop_data in stops_config_file:
                 stop_data = [i for i in stop_data.split(';')]
-                stop_ids_list.append(stop_data[0])  # keep track of stop_ids in the order of appearance
+                stop_ids_list.append(int(stop_data[0]))  # keep track of int stop_ids in the order of appearance
                 # construct a Stop instance and add to stops dictionary
-                stops[stop_data[0]] = Stop(stop_data)
+                stops[int(stop_data[0])] = Stop(stop_data)  # int stop_id is key
         # iterate over every stop for global alight demand storage
         for stop_id in stop_ids_list:
             # get subsequent alight demands and update alight demands of corresponding stops
@@ -132,7 +133,7 @@ class TransitLine:
                 stops[curr_subseq_stop_ids[idx]].alight_demand += curr_subseq_alight_demand[idx]
 
         # build buses list
-        print('        Building buses ...')
+        print('         - Building buses ...')
         with open(self._buses_config_file, 'r') as buses_config_file:
             bus_ct = 1  # bus number starts at 1
             for bus_data in buses_config_file:
@@ -145,7 +146,7 @@ class TransitLine:
 
     def _simulate(self, rep_id, save_bus, save_stop):
 
-        print('Status: Simulating rep{0} ...'.format(rep_id))
+        print('Status: Simulating rep{0} with max_clk {1} s ...'.format(rep_id, self._max_clk))
         time0 = time.time()
 
         global clk
@@ -162,7 +163,7 @@ class TransitLine:
 
             # initialize simulation
             self._initialize()
-            event_type = 1  # initialize is event_type 1
+            event_type = 0  # initialize is event_type 0
             stop_id, stop_pax = '', ''
             bus_id, bus_type, bus_pax = '', '', ''
             line = '{0},{1:.2f},{2},{3},{4},{5},{6},{7}\n'.format(ent, clk, event_type, stop_id,
@@ -170,7 +171,9 @@ class TransitLine:
             output_file.write(line)  # writing initialize event
             ent += 1
 
-            print('        Running ...')
+            print('         - Running ...')
+            sys.stdout.flush()
+            sys.stdout.write('\r             clk: {0} \n'.format(clk))
             while t_list and event_list:  # this is not empty after simulation initialization
 
                 # terminating condition. if the next event is beyond max clock time, end simulation
@@ -222,8 +225,7 @@ class TransitLine:
                 ent += 1  # update entry counter
 
         time1 = time.time()
-        print('Status: Finished simulating rep{0} ...'.format(rep_id))
-        print('        Elapsed time -- {0:.2f} s'.format(time1 - time0))
+        print('         - Elapsed time: {0:.2f} s'.format(time1 - time0))
 
     def _initialize(self):
         """
@@ -240,8 +242,7 @@ class TransitLine:
         global buses
         global headway
 
-        print('        Simulation will end at clock time: {0} ...'.format(self._max_clk))
-        print('        Initializing ...')
+        print('         - Initializing ...')
 
         # initialize pax arrivals at each stop
         warmup_timetable = buses[bus_ids_list[0]].arr_timetable  # first bus needs to cover all stops
@@ -253,7 +254,7 @@ class TransitLine:
 
         # initialize bus dispatch (this is already considering dispatch headway in timetable)
         for bus in buses:
-            bus.schedule_arrival()
+            buses[bus].schedule_arrival()
 
     def _insert_bus(self, late_bus):
 
@@ -337,10 +338,6 @@ class Bus:
         # attribute to keep track of current stop index for this bus
         self._stop_idx = -1
 
-        # the bus starts with zero passengers
-        self._pax_lists = {}
-        self._num_pax = 0
-
         # delay is updated on each event of the bus
         self._delay = 0
 
@@ -423,11 +420,19 @@ class Bus:
             self._mu_acc_rate = copy_bus.mu_acc_rate
             self._sigma_acc_rate = copy_bus.sigma_acc_rate
 
+        # the bus starts with zero passengers
+        self._pax_lists = {}
+        for stop_id in self._stop_ids_list:
+            self._pax_lists[stop_id] = []
+        self._num_pax = 0
+
     def _build_timetable(self):
         """
         this function builds the stop arrival and departure timetable
         :return:
-        """
+            """
+
+        global stops
 
         self._arr_timetable = []
         self._dept_timetable = []
@@ -436,7 +441,7 @@ class Bus:
         for idx in range(0, len(self._stop_ids_list)):
             stop = stops[self._stop_ids_list[idx]]
             self._arr_timetable.append(schedule_t)
-            if idx < len(self._stop_ids_list):  # departure is not scheduled for last stop in route
+            if idx < len(self._stop_ids_list) - 1:  # departure is not scheduled for last stop in route
                 # schedule departure at max of time to alight and time to board plus stop slack
                 schedule_t += (max(stop.alight_demand*pax_alight_t, stop.board_demand*pax_board_t) +
                                self._stop_slack[idx])
@@ -545,7 +550,10 @@ class Bus:
         self._delay = max(0, clk - self._arr_timetable[self._stop_idx])
 
         # remove alighting passengers from bus
-        num_pax_off = len(self._pax_lists[self._stop_idx])
+        if self._pax_lists:
+            num_pax_off = len(self._pax_lists[self._stop_idx])
+        else:
+            num_pax_off = 0
         self._num_pax -= num_pax_off
         self._pax_lists[self._stop_idx] = []
 
@@ -577,6 +585,8 @@ class Bus:
             else:
                 added_bus_units.append(self._unit_id)
 
+        return self._stop_ids_list[self._stop_idx], self._num_pax, self._bus_id, self._bus_id, self._num_pax
+
     def run_departure(self):
         """
         this function does nothing but calling schedule_arrival for the next stop
@@ -585,6 +595,8 @@ class Bus:
 
         # update delay
         self._delay = max(0, clk - self._dept_timetable[self._stop_idx])
+
+        return self._stop_ids_list[self._stop_idx], self._num_pax, self._bus_id, self._bus_id, self._num_pax
 
         self.schedule_arrival()
 
@@ -735,14 +747,15 @@ class Stop:
         :return len(self._pax): number of pax in the stop
         """
         # compute destination station
-        destination = np.random.choice(self._subseq_stop_ids, p=self._subseq_alight_probs)
+        if self._subseq_stop_ids:
+            destination = np.random.choice(self._subseq_stop_ids, p=self._subseq_alight_probs)
 
-        # append to pax list
-        self._pax.append(Pax(self._stop_id, destination))
-        self._num_pax += 1
+            # append to pax list
+            self._pax.append(Pax(self._stop_id, destination))
+            self._num_pax += 1
 
-        # schedule next passenger arrival
-        self.schedule_pax_arrival()  # based on current clock time
+            # schedule next passenger arrival
+            self.schedule_pax_arrival()  # based on current clock time
 
     def run_pax_boarding(self, num_pax_boarding):
         """
