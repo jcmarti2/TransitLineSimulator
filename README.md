@@ -8,13 +8,13 @@ this repository contains the TransitLineSimulator. to use this package, please r
 ## directories
 ### /config: this directory contains the simulation configuration files
 in the following descriptions '{0}' denotes the (unique) replication id. the columns of each file are specified. the files should not contain headers.
-  - rep{0}_rep.txt: max_clock_time;headway;pax_board_t;pax_alight_t;bunch_threshold;bus_addition_stops_ahead
-    * max_clock_time: maximum simulation clock time [s]
-    * headway: time headway between bus departures [s]
-    * pax_board_t: boarding time per passenger [s]
-    * pax_alight_t: alighting time per passenger [s]
-    * bunch_treshold: time delay for bus addition triggering [s]
-    * bus_addition_stops_ahead: int number of stops ahead for bus addition []
+  - rep{0}_rep.txt: max_clk;headway;pax_board_t;pax_alight_t;bunch_threshold;bus_addition_stops_ahead
+    * max_clk: maximum simulation clock time; float or int [s]
+    * headway: time headway between bus departures; float or int [s]
+    * pax_board_t: boarding time per passenger; float or int [s]
+    * pax_alight_t: alighting time per passenger; float or int [s]
+    * bunch_treshold: time delay for bus addition triggering; float or int [s]
+    * bus_addition_stops_ahead: number of stops ahead for bus addition; int []
   - rep{0}_buses.txt: bus_id;bus_capacity;mean_cruise_speed;cv_cruise_speed;acc_rate;cv_acc_rate;stop_list; stop_slack
     * bus_id: unique bus run id []
     * bus_capacity: int bus passenger capacity []
@@ -25,7 +25,7 @@ in the following descriptions '{0}' denotes the (unique) replication id. the col
     * stop_list:
     * stop_slack:
   - rep{0}_stops.txt: stop_id;abs_distance;board_demand;[subseq_alight_demand]
-    * stop_id: unique stop id []
+    * stop_id: int starting from 0, unique stop id []
     * abs_distance: absolute stop distance along the bus line from the origin [m]
     * board_demand: passenger demand [pax/hr]
     * [subseq_alight_demand]: list containing alight demand (comma separated) from this stop to the subsequent stops [pax/hr]
@@ -45,6 +45,7 @@ in the following descriptions '{0}' denotes the (unique) replication id. the col
 ### /src: this directory contains the simulation source code
   - TransitLine.py: contains simulator
   - simulate_transit_line.py: runs simulator
+  - build_config.py: builds configuration files
 
 ## disclaimer
 this package is freely available, but please cite when appropriate. note that this package is provided 'as-is'. while i have put significant effort verifying this package, i cannot account for all possible edge cases at this moment.
