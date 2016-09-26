@@ -163,7 +163,7 @@ class TransitLine:
 
             # initialize simulation
             self._initialize()
-            event_type = 0  # initialize is event_type 0
+            event_type = 'init'  # initialize is event_type 0
             stop_id, stop_pax = '', ''
             bus_id, bus_type, bus_pax = '', '', ''
             line = '{0},{1:.2f},{2},{3},{4},{5},{6},{7}\n'.format(ent, clk, event_type, stop_id,
@@ -172,9 +172,10 @@ class TransitLine:
             ent += 1
 
             print('         - Running ...')
-            sys.stdout.flush()
-            sys.stdout.write('\r             clk: {0} \n'.format(clk))
             while t_list and event_list:  # this is not empty after simulation initialization
+
+                sys.stdout.flush()
+                sys.stdout.write('\r             clk: {0}'.format(clk))
 
                 # terminating condition. if the next event is beyond max clock time, end simulation
                 if t_list[0] > self._max_clk:
@@ -185,7 +186,7 @@ class TransitLine:
 
                 # event type is passenger arrival
                 if isinstance(event_list[0], Stop):
-                    event_type = 3  # pax arrival event type
+                    event_type = 'pax_arr'  # pax arrival event type
                     event_list[0].run_pax_arrival()
                     if save_stop:
                         stop_id = event_list[0].stop_id
@@ -196,10 +197,9 @@ class TransitLine:
                         output_file.write(line)
 
                 elif isinstance(event_list[0][0], Bus):
-
                     # event type is bus arrival to stop
                     if event_list[0][1] == 'arrival':
-                        event_type = 1  # bus arrival event type
+                        event_type = 'bus_arr'  # bus arrival event type
                         stop_id, stop_pax, bus_id, bus_type, bus_pax = event_list[0][0].run_arrival()
                         if save_bus:
                             line = '{0},{1:.2f},{2},{3},{4},{5},{6},{7}\n'.format(ent, clk, event_type, stop_id,
@@ -208,7 +208,7 @@ class TransitLine:
 
                     # event type is bus departure from stop
                     elif event_list[0][1] == 'departure':
-                        event_type = 2  # bus departure event type
+                        event_type = 'bus_dept'  # bus departure event type
                         stop_id, stop_pax, bus_id, bus_type, bus_pax = event_list[0][0].run_departure()
                         if save_bus:
                             line = '{0},{1:.2f},{2},{3},{4},{5},{6},{7}\n'.format(ent, clk, event_type, stop_id,
@@ -225,7 +225,7 @@ class TransitLine:
                 ent += 1  # update entry counter
 
         time1 = time.time()
-        print('         - Elapsed time: {0:.2f} s'.format(time1 - time0))
+        print('\n         - Elapsed time: {0:.2f} s'.format(time1 - time0))
 
     def _initialize(self):
         """
