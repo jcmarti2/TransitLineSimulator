@@ -24,13 +24,14 @@ num_buses = 100
 
 # uniform bus configs (simple)
 buses_uniform = True                 # True if bus building is uniform, False otherwise; bool
+num_stops = 10                       # number of stops in line from origin to end; int []
 bus_capacity = 30                    # passenger capacity of bus; int [pax]
 mean_cruise_speed = 50               # mean cruise speed; float or int [km/h]
 cv_cruise_speed = 2                  # coefficient of variation of cruise speed; float or int [] (small if no r.v.)
 mean_acc_rate = 4                    # mean acceleration rate; float or int [m/s^2]
 cv_acc_rate = 0.5                    # coefficient of variation of acceleration rate; float or int [] (small if no r.v.)
-stop_list = list(range(12))          # stops list; [stop id of stop for stop in stops]
-stop_slack = [0 for _ in range(12)]  # stops slack list [slack at stop for stop in stops]; int or float [s]
+stop_list = list(range(num_stops))   # stops list; [stop id of stop for stop in stops]
+stop_slack = [0 for _ in stop_list]  # stops slack list [slack at stop for stop in stops]; int or float [s]
 
 # custom bus configs (same types as above, specify by hand).
 # len of all lists must be the same.
@@ -45,12 +46,19 @@ stop_slacks = []
 
 
 # ----- stops ----- #
-stops = False
+stops = True
 # uniform stop configs (simple)
-stops_uniform = True
+stops_uniform = True                 # True if stop building is uniform, False otherwise; bool
+num_stops = 10                       # number of stops in line from origin to end; int []
+spacing = 250                        # spacing between stops; float or int [m]
+board_demand = 30                    # passenger demand; float or int [pax/hr]
+
 # custom stop configs (same types as above, specify by hand).
 # len of all lists must be the same.
-stops_custom = False
+stops_custom = False                 #
+abs_distances = []                   #
+board_demands = []                   #
+subseq_alight_demands = []           # [stop_id + 1, stop_id + 2, ... ,end]; sum must be board_demand[stop_idx] [pax/hr]
 
 # ------------------------------ #
 #         NO USER INPUT          #
@@ -68,12 +76,12 @@ if buses:
         raise Exception('Specify only one of uniform or customized bus building ...')
     with open('{0}rep{1}_buses.txt'.format(config_dir, rep_id), 'w+') as file:
         if buses_uniform:
-            for bus_id in range(num_buses):
+            for bus_id in range(num_buses):  # starts at 0
                 file.write('{0};{1};{2};{3};{4};{5};{6};{7}\n'.format(bus_id, bus_capacity, mean_cruise_speed,
                                                                       cv_cruise_speed, mean_acc_rate, cv_acc_rate,
                                                                       stop_list, stop_slack))
         elif buses_custom:
-            for bus_id in range(num_buses):
+            for bus_id in range(num_buses):  # starts at 0
                 file.write('{0};{1};{2};{3};{4};{5};{6};{7}\n'.format(bus_id, bus_capacities[bus_id],
                                                                       mean_cruise_speeds[bus_id],
                                                                       cv_cruise_speeds[bus_id], mean_acc_rates[bus_id],
@@ -84,4 +92,12 @@ if stops:
     if (stops_uniform and stops_custom) or (not stops_uniform and not stops_custom):
         raise Exception('Specify only one of uniform or customized stop building ...')
     with open('{0}rep{1}_stops.txt'.format(config_dir, rep_id), 'w+') as file:
-        pass
+        if stops_uniform:
+            for stop_id in range(num_stops):  # starts at 0
+                file.write('{0};{1};{2};{3}\n'.format(stop_id, spacing*stop_id, board_demand,
+                                                      [board_demand/(num_stops - stop_id - 1)
+                                                       for _ in range(num_stops - stop_id - 1)]))
+        elif stops_custom:
+            for stop_id in range(num_stops):  # starts at 0
+                file.write('{0};{1};{2};{3}\n'.format(stop_id, abs_distances[stop_id], board_demands[stop_id],
+                                                      subseq_alight_demands[stop_id]))
