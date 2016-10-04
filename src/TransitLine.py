@@ -154,8 +154,11 @@ class TransitLine:
         global event_list
 
         # build output file if it does not yet exist
-        if not os.path.exists(self._output_dir):
-            os.makedirs(self._output_dir)
+        if not os.path.exists(self._output_file):
+            os.makedirs(self._output_file)
+        else:
+            #raise Exception('Attempted to overwrite existing output ...')
+            pass
 
         # open file were output will be saved
         with open(self._output_file, 'w+') as output_file:
@@ -175,7 +178,7 @@ class TransitLine:
             while t_list and event_list:  # this is not empty after simulation initialization
 
                 sys.stdout.flush()
-                sys.stdout.write('\r             clk: {0}'.format(clk))
+                sys.stdout.write('\r             clk: {0:.2f} s'.format(clk))
 
                 # terminating condition. if the next event is beyond max clock time, end simulation
                 if t_list[0] > self._max_clk:
@@ -596,9 +599,16 @@ class Bus:
         # update delay
         self._delay = max(0, clk - self._dept_timetable[self._stop_idx])
 
-        return self._stop_ids_list[self._stop_idx], self._num_pax, self._bus_id, self._bus_id, self._num_pax
-
+        # update stop idx
+        self._stop_idx += 1
         self.schedule_arrival()
+
+        return self._stop_ids_list[self._stop_idx - 1], self._num_pax, self._bus_id, self._bus_id, self._num_pax
+
+
+    @property
+    def stop_idx(self):
+        return self._stop_idx
 
     @property
     def stop_ids_list(self):
