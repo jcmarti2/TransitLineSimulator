@@ -16,7 +16,7 @@ def build_trajectories(rep_id):
         with open('{0}rep{1}_stops.txt'.format(config_dir, rep_id), 'r+') as file:
             for row in file:
                 row = row.strip('\n').split(';')
-                input(row)
+                # input(row)
                 stop_dist[row[0]] = float(row[1])
     else:
         raise Exception('There is no stops configuration file for rep{0} ...'.format(rep_id))
@@ -27,19 +27,23 @@ def build_trajectories(rep_id):
             for row in file:
                 row = row.strip('\n').split(',')
                 if row[2] == 'bus_arr' or row[2] == 'bus_dept':
-                    if row[3] not in trajs:
-                        trajs[row[3]] = []
-                    input(row[3])
-                    trajs[row[3]].append([row[1], stop_dist[row[3]]])
-
+                    if row[5] not in trajs:
+                        trajs[row[5]] = []
+                    # input(row[3])
+                    trajs[row[5]].append([row[1], stop_dist[row[3]]])
+                    print(row)
+                    input(trajs[row[5]])
         plt.figure()
         for bus in trajs:
+            # input(trajs[bus])
             tss = []
             dists = []
             for stop in trajs[bus]:
                 tss.append(float(stop[0]))
                 dists.append(stop[1])
             plt.plot(tss, dists)
+        plt.xlabel('Time [s]')
+        plt.ylabel('Distance [m]')
         plt.show()
 
 

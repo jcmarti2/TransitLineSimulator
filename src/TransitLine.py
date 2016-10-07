@@ -25,11 +25,6 @@ num_added_bus_runs = 0           # number of added bus runs (not physical unit),
 bunch_threshold = None           # time threshold for bunching detection based on delay [s]
 bus_addition_stops_ahead = None  # int number of stops ahead of delayed bus where bus is inserted [] >= 1
 
-# TODO: TAKE CARE OF PAX THAT ARRIVE WHILE BOARDING HAPPENS
-# TODO: DESIGN AND IMPLEMENT BUS INSERTION
-# TODO: BUS RECYCLING AND RETIRING
-# TODO: DOUBLE CHECK LOG NORMAL DISTRIBUTION FITTING
-
 
 class TransitLine:
 
@@ -55,7 +50,7 @@ class TransitLine:
         # max clock time of this simulation replication
         self._max_clk = None
 
-    def simulate(self, rep_id, save_bus=False, save_stop=False):
+    def simulate(self, rep_id):
         """
         this function runs the simulation
         :param rep_id: replication id
@@ -74,7 +69,7 @@ class TransitLine:
         self._parse_config_files()
 
         # run simulation
-        self._simulate(rep_id, save_bus, save_stop)
+        self._simulate(rep_id)
 
         # reset class
         self._reset_simulator()
@@ -135,7 +130,7 @@ class TransitLine:
         # build buses list
         print('         - Building buses ...')
         with open(self._buses_config_file, 'r') as buses_config_file:
-            bus_ct = 1  # bus number starts at 1
+            bus_ct = 1  # first bus is deployed one headway after simulation start
             for bus_data in buses_config_file:
                 bus_data = [i for i in bus_data.split(';')]
                 bus_ids_list.append(bus_data[0])  # keep track of stop_ids in the order of appearance
@@ -144,7 +139,7 @@ class TransitLine:
                 buses[bus_data[0]] = Bus(bus_data=bus_data, start_time=headway*bus_ct)
                 bus_ct += 1
 
-    def _simulate(self, rep_id, save_bus, save_stop):
+    def _simulate(self, rep_id):
 
         print('Status: Simulating rep{0} with max_clk {1} s ...'.format(rep_id, self._max_clk))
         time0 = time.time()
@@ -152,6 +147,7 @@ class TransitLine:
         global clk
         global t_list
         global event_list
+        global stops
 
         # build output file if it does not yet exist
         if not os.path.exists(self._output_file):
@@ -166,11 +162,8 @@ class TransitLine:
 
             # initialize simulation
             self._initialize()
-            event_type = 'init'  # initialize is event_type 0
-            stop_id, stop_pax = '', ''
-            bus_id, bus_type, bus_pax = '', '', ''
-            line = '{0},{1:.2f},{2},{3},{4},{5},{6},{7}\n'.format(ent, clk, event_type, stop_id,
-                                                                  stop_pax, bus_id, bus_type, bus_pax)
+            event_type = 'init'  # initialize event
+            line = '{0},{1:.2f},{2}\n'.format(ent, clk, event_type)
             output_file.write(line)  # writing initialize event
             ent += 1
 
@@ -191,36 +184,43 @@ class TransitLine:
                 if isinstance(event_list[0], Stop):
                     event_type = 'pax_arr'  # pax arrival event type
                     event_list[0].run_pax_arrival()
-                    if save_stop:
-                        stop_id = event_list[0].stop_id
-                        stop_pax = event_list[0].num_pax
-                        bus_id, bus_type, bus_pax = '', '', ''
-                        line = '{0},{1:.2f},{2},{3},{4},{5},{6},{7}\n'.format(ent, clk, event_type, stop_id,
-                                                                              stop_pax, bus_id, bus_type, bus_pax)
-                        output_file.write(line)
+                    stop_id = event_list[0].stop_id
+                    stop_pax = event_list[0].num_pax
+                    line = '{0},{1:.2f},{2},{3},{4}\n'.format(ent, clk, event_type, stop_id, stop_pax)
 
                 elif isinstance(event_list[0][0], Bus):
                     # event type is bus arrival to stop
                     if event_list[0][1] == 'arrival':
                         event_type = 'bus_arr'  # bus arrival event type
-                        stop_id, stop_pax, bus_id, bus_type, bus_pax = event_list[0][0].run_arrival()
-                        if save_bus:
-                            line = '{0},{1:.2f},{2},{3},{4},{5},{6},{7}\n'.format(ent, clk, event_type, stop_id,
-                                                                                  stop_pax, bus_id, bus_type, bus_pax)
-                            output_file.write(line)
+                        event_list[0][0].run_arrival()  # run event
+                        stop_id = event_list[0][0].stop_ids_list[event_list[0][0].stop_idx]
+                        stop_pax = stops[stop_id].num_pax
+                        bus_id = event_list[0][0].bus_id
+                        unit_id = event_list[0][0].unit_id
+                        bus_pax = event_list[0][0].num_pax
+                        delay = event_list[0][0].delay
+                        line = '{0},{1:.2f},{2},{3},{4},{5},{6},{7},{8}\n'.format(ent, clk, event_type, stop_id,
+                                                                                  stop_pax, bus_id, unit_id, bus_pax,
+                                                                                  delay)
 
                     # event type is bus departure from stop
                     elif event_list[0][1] == 'departure':
                         event_type = 'bus_dept'  # bus departure event type
-                        stop_id, stop_pax, bus_id, bus_type, bus_pax = event_list[0][0].run_departure()
-                        if save_bus:
-                            line = '{0},{1:.2f},{2},{3},{4},{5},{6},{7}\n'.format(ent, clk, event_type, stop_id,
-                                                                                  stop_pax, bus_id, bus_type, bus_pax)
-                            output_file.write(line)
+                        event_list[0][0].run_departure()
+                        stop_id = event_list[0][0].stop_ids_list[event_list[0][0].stop_idx]
+                        stop_pax = stops[stop_id].num_pax
+                        bus_id = event_list[0][0].bus_id
+                        unit_id = event_list[0][0].unit_id
+                        bus_pax = event_list[0][0].num_pax
+                        delay = event_list[0][0].delay
+                        line = '{0},{1:.2f},{2},{3},{4},{5},{6},{7},{8}\n'.format(ent, clk, event_type, stop_id,
+                                                                                  stop_pax, bus_id, unit_id, bus_pax,
+                                                                                  delay)
 
                     if event_list[0][0].delay > bunch_threshold:
                         self._insert_bus(event_list[0][0])
 
+                output_file.write(line)
                 # remove first items from t_list and event_list
                 t_list.pop(0)
                 event_list.pop(0)
@@ -230,13 +230,13 @@ class TransitLine:
         time1 = time.time()
         print('\n         - Elapsed time: {0:.2f} s'.format(time1 - time0))
 
-    def _initialize(self):
+    @staticmethod
+    def _initialize():
         """
         this function initializes the simulation events
         :return:
         """
 
-        global clk
         global t_list
         global event_list
         global stop_ids_list
@@ -251,8 +251,8 @@ class TransitLine:
         warmup_timetable = buses[bus_ids_list[0]].arr_timetable  # first bus needs to cover all stops
         for stop_idx in range(0, len(stop_ids_list)):
             t = warmup_timetable[stop_idx] - headway
-            idx = bisect.bisect_left(t_list, clk + t)  # bisect left because pax arrival has priority
-            t_list.insert(idx, clk + t)
+            idx = bisect.bisect_left(t_list, t)  # bisect left because pax arrival has priority
+            t_list.insert(idx, t)
             event_list.insert(idx, stops[stop_idx])  # schedule first pax arrival of stop at stop_idx
 
         # initialize bus dispatch (this is already considering dispatch headway in timetable)
@@ -436,6 +436,7 @@ class Bus:
             """
 
         global stops
+        global headway
 
         self._arr_timetable = []
         self._dept_timetable = []
@@ -446,7 +447,7 @@ class Bus:
             self._arr_timetable.append(schedule_t)
             if idx < len(self._stop_ids_list) - 1:  # departure is not scheduled for last stop in route
                 # schedule departure at max of time to alight and time to board plus stop slack
-                schedule_t += (max(stop.alight_demand*pax_alight_t, stop.board_demand*pax_board_t) +
+                schedule_t += (max(stop.alight_demand*pax_alight_t*headway, stop.board_demand*pax_board_t*headway) +
                                self._stop_slack[idx])
                 self._dept_timetable.append(schedule_t)
                 next_stop = stops[self._stop_ids_list[idx + 1]]
@@ -487,7 +488,7 @@ class Bus:
             if s >= (v**2) / (2*a):
                 acc_s = (v**2) / (2*a)  # [m]
                 cruise_s = s - (v**2) / (2*a)  # [m]
-                t = cruise_s/v + (2/(2**0.5))*((acc_s/a)**0.5)  # [s]
+                t = cruise_s / v + (2 / (2 ** 0.5)) * ((acc_s / a) ** 0.5)  # [s]
             # if spacing does not allow for cruise speed
             else:
                 t = (2/(2**0.5))*((s/a)**0.5)  # [s]
@@ -510,6 +511,7 @@ class Bus:
         global event_list
         global pax_board_t
         global pax_alight_t
+        global added_bus_units
 
         if self._inservice or (not self._inservice and self._num_pax):
             t_off = num_pax_off*pax_alight_t  # time for all pax to alight
@@ -520,6 +522,9 @@ class Bus:
             idx = bisect.bisect_left(t_list, clk + t)
             t_list.insert(idx, clk)
             event_list.insert(idx, [self, 'departure'])
+
+        else:  # retire bus if it is not in service and becomes empty
+            added_bus_units.append(self._unit_id)
 
     def run_arrival(self):
 
@@ -537,14 +542,14 @@ class Bus:
                     scheduled_bus_units.pop(0)
                 else:  # generate new unit
                     num_scheduled_bus_units += 1
-                    self._unit_id = num_scheduled_bus_units
+                    self._unit_id = 's{0}'.format(num_scheduled_bus_units)
             else:
                 if added_bus_units:  # if there are addition units avaialable, recycle
                     self._unit_id = added_bus_units[0]
                     added_bus_units.pop(0)
                 else:  # generate new unit
                     num_added_bus_units += 1
-                    self._unit_id = num_added_bus_units
+                    self._unit_id = 'a{0}'.format(num_added_bus_units)
 
         # update stop idx
         self._stop_idx += 1
@@ -588,8 +593,6 @@ class Bus:
             else:
                 added_bus_units.append(self._unit_id)
 
-        return self._stop_ids_list[self._stop_idx], self._num_pax, self._bus_id, self._bus_id, self._num_pax
-
     def run_departure(self):
         """
         this function does nothing but calling schedule_arrival for the next stop
@@ -603,8 +606,21 @@ class Bus:
         self._stop_idx += 1
         self.schedule_arrival()
 
-        return self._stop_ids_list[self._stop_idx - 1], self._num_pax, self._bus_id, self._bus_id, self._num_pax
+    @property
+    def bus_id(self):
+        return self._bus_id
 
+    @property
+    def unit_id(self):
+        return self._unit_id
+
+    @property
+    def num_pax(self):
+        return self._num_pax
+
+    @property
+    def delay(self):
+        return self._delay
 
     @property
     def stop_idx(self):
@@ -670,7 +686,6 @@ class Stop:
         this is the constructor for the stop class
         :param stop_data: list holding stop data [stop_id, abs_distance, board_demand, [subseq_alight_demand]]
         """
-
         self._stop_id = int(stop_data[0])  # int
         self._abs_dist = float(stop_data[1])  # [m]
         # this is the boarding demand of this station

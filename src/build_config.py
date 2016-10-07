@@ -24,12 +24,12 @@ num_buses = 100
 
 # uniform bus configs (simple)
 buses_uniform = True                 # True if bus building is uniform, False otherwise; bool
-num_stops = 10                       # number of stops in line from origin to end; int []
-bus_capacity = 30                    # passenger capacity of bus; int [pax]
-mean_cruise_speed = 50               # mean cruise speed; float or int [km/h]
-cv_cruise_speed = 2                  # coefficient of variation of cruise speed; float or int [] (small if no r.v.)
-mean_acc_rate = 4                    # mean acceleration rate; float or int [m/s^2]
-cv_acc_rate = 0.5                    # coefficient of variation of acceleration rate; float or int [] (small if no r.v.)
+num_stops = 24                       # number of stops in line from origin to end; int []
+bus_capacity = 60                    # passenger capacity of bus; int [pax]
+mean_cruise_speed = 30               # mean cruise speed; float or int [km/h]
+cv_cruise_speed = 1/30               # coefficient of variation of cruise speed; float or int [] (small if no r.v.)
+mean_acc_rate = 1                    # mean acceleration rate; float or int [m/s^2]
+cv_acc_rate = 0.1/1                  # coefficient of variation of acceleration rate; float or int [] (small if no r.v.)
 stop_list = list(range(num_stops))   # stops list; [stop id of stop for stop in stops]
 stop_slack = [0 for _ in stop_list]  # stops slack list [slack at stop for stop in stops]; int or float [s]
 
@@ -49,9 +49,9 @@ stop_slacks = []
 stops = True
 # uniform stop configs (simple)
 stops_uniform = True                 # True if stop building is uniform, False otherwise; bool
-num_stops = 10                       # number of stops in line from origin to end; int []
-spacing = 250                        # spacing between stops; float or int [m]
-board_demand = 30                    # passenger demand; float or int [pax/hr]
+num_stops = 24                       # number of stops in line from origin to end; int []
+spacing = 1000                       # spacing between stops; float or int [m]
+board_demand = 50                    # passenger demand; float or int [pax/hr]
 
 # custom stop configs (same types as above, specify by hand).
 # len of all lists must be the same.
