@@ -151,7 +151,8 @@ class TransitLine:
 
         # build output file if it does not yet exist
         if not os.path.exists(self._output_file):
-            os.makedirs(self._output_file)
+            pass
+            # os.makedirs(self._output_file)
         else:
             #raise Exception('Attempted to overwrite existing output ...')
             pass
@@ -187,6 +188,7 @@ class TransitLine:
                     stop_id = event_list[0].stop_id
                     stop_pax = event_list[0].num_pax
                     line = '{0},{1:.2f},{2},{3},{4}\n'.format(ent, clk, event_type, stop_id, stop_pax)
+                    # output_file.write(line)
 
                 elif isinstance(event_list[0][0], Bus):
                     # event type is bus arrival to stop
@@ -217,10 +219,10 @@ class TransitLine:
                                                                                   stop_pax, bus_id, unit_id, bus_pax,
                                                                                   delay)
 
-                    if event_list[0][0].delay > bunch_threshold:
+                    if event_list[0][0].delay > bunch_threshold and event_list[0][0].inservice:
                         self._insert_bus(event_list[0][0])
 
-                output_file.write(line)
+                    output_file.write(line)
                 # remove first items from t_list and event_list
                 t_list.pop(0)
                 event_list.pop(0)
@@ -259,13 +261,15 @@ class TransitLine:
         for bus in buses:
             buses[bus].schedule_arrival()
 
-    def _insert_bus(self, late_bus):
+    @staticmethod
+    def _insert_bus(late_bus):
 
-        global clk
+        global buses
         global bus_addition_stops_ahead
 
         if late_bus.stop_idx + bus_addition_stops_ahead < len(late_bus.arr_timetable) - 1:
             late_bus.inservice = False
+            print('ad')
             Bus(addition=True, copy_bus=late_bus)
         else:  # if no space for adding a bus
             pass
@@ -344,16 +348,13 @@ class Bus:
         # delay is updated on each event of the bus
         self._delay = 0
 
-        # service status
-        self._inservice = True
-
         # this is set once bus starts running based on available units
         self._unit_id = None  # int of bus unit (actual physical bus) id, for potential recycling
 
         # if bus was not from a bus addition strategy, read from configuration file
         self._addition = addition
-        if not self._addition:
 
+        if not self._addition:
             self._bus_id = int(bus_data[0])  # int of bus run id
             self._bus_capacity = int(bus_data[1])  # int of pax capacity
 
@@ -408,11 +409,11 @@ class Bus:
         else:
 
             self._bus_id = 'a{0}'.format(num_added_bus_units)  # int of bus run id
-            self._unit_id = None  # set when bus is deployed
             self._start_time = copy_bus.arr_timetable[copy_bus.stop_idx + bus_addition_stops_ahead]
 
             # timetable is only that left for the delayed bus
             self._stop_ids_list = copy_bus.stop_ids_list[copy_bus.stop_idx + bus_addition_stops_ahead:]
+            self._num_stops = len(self._stop_ids_list)
             self._arr_timetable = copy_bus.arr_timetable[copy_bus.stop_idx + bus_addition_stops_ahead:]
             self._dept_timetable = copy_bus.dept_timetable[copy_bus.stop_idx + bus_addition_stops_ahead:]
             self._bus_capacity = copy_bus.bus_capacity
@@ -422,6 +423,10 @@ class Bus:
             self._mean_acc_rate = copy_bus.mean_acc_rate
             self._mu_acc_rate = copy_bus.mu_acc_rate
             self._sigma_acc_rate = copy_bus.sigma_acc_rate
+            self.schedule_arrival()
+
+        # service status starts as not in service
+        self._inservice = False
 
         # the bus starts with zero passengers
         self._pax_lists = {}
@@ -516,11 +521,12 @@ class Bus:
         if self._inservice or (not self._inservice and self._num_pax):
             t_off = num_pax_off*pax_alight_t  # time for all pax to alight
             t_on = num_pax_on*pax_board_t  # time for all pax to board
-            # note that departure timetable is with respect to ideal case, so no + clk is needed
-            t = max(clk + t_off, clk + t_on, self._dept_timetable[self._stop_idx])
 
-            idx = bisect.bisect_left(t_list, clk + t)
-            t_list.insert(idx, clk)
+            # note that departure timetable is with respect to ideal case, so no + clk is needed
+            t = max(t_off, t_on)
+
+            idx = bisect.bisect_left(t_list, max(clk + t, self._dept_timetable[self._stop_idx]))
+            t_list.insert(idx, clk + t)
             event_list.insert(idx, [self, 'departure'])
 
         else:  # retire bus if it is not in service and becomes empty
@@ -536,13 +542,17 @@ class Bus:
         global num_added_bus_units
 
         if self._stop_idx < 0:
+
+            # service status
+            self._inservice = True
+
             if not self._addition:  # check if this bus is scheduled or added
                 if scheduled_bus_units:  # if there are units available, recycle
                     self._unit_id = scheduled_bus_units[0]
                     scheduled_bus_units.pop(0)
                 else:  # generate new unit
                     num_scheduled_bus_units += 1
-                    self._unit_id = 's{0}'.format(num_scheduled_bus_units)
+                    self._unit_id = 'r{0}'.format(num_scheduled_bus_units)
             else:
                 if added_bus_units:  # if there are addition units avaialable, recycle
                     self._unit_id = added_bus_units[0]
@@ -559,7 +569,7 @@ class Bus:
 
         # remove alighting passengers from bus
         if self._pax_lists:
-            num_pax_off = len(self._pax_lists[self._stop_idx])
+            num_pax_off = len(self._pax_lists[self._stop_ids_list[self._stop_idx]])
         else:
             num_pax_off = 0
         self._num_pax -= num_pax_off
@@ -569,7 +579,7 @@ class Bus:
         if self._inservice:
             # should be zero at the last stop of route (geographically the same as the first one as it is a loop, but
             # set as different stops in this implementation)
-            on_pax = stops[self._stop_idx].pax
+            on_pax = stops[self._stop_ids_list[self._stop_idx]].pax
             num_pax_on = 0
             for pax in on_pax:
                 if self._num_pax < self._bus_capacity:  # do not exceed bus capacity
@@ -603,7 +613,7 @@ class Bus:
         self._delay = max(0, clk - self._dept_timetable[self._stop_idx])
 
         # update stop idx
-        self._stop_idx += 1
+        # self._stop_idx += 1
         self.schedule_arrival()
 
     @property

@@ -2,6 +2,9 @@ import os
 import pandas as pd
 import sys
 import matplotlib.pyplot as plt
+from matplotlib import rc
+rc('font', **{'family': 'serif', 'serif': ['Computer Modern']})
+rc('text', usetex=True)
 
 __author__ = 'juan carlos martinez mori'
 
@@ -31,19 +34,20 @@ def build_trajectories(rep_id):
                         trajs[row[5]] = []
                     # input(row[3])
                     trajs[row[5]].append([row[1], stop_dist[row[3]]])
-                    print(row)
-                    input(trajs[row[5]])
-        plt.figure()
+
+        # plot results
+        fig = plt.figure()
+        ax = fig.add_subplot(111)
         for bus in trajs:
-            # input(trajs[bus])
             tss = []
             dists = []
             for stop in trajs[bus]:
                 tss.append(float(stop[0]))
                 dists.append(stop[1])
-            plt.plot(tss, dists)
-        plt.xlabel('Time [s]')
-        plt.ylabel('Distance [m]')
+            ax.plot(tss, dists, 'k')
+        ax.set_title('Transit Line Vehicle Trajectories')
+        ax.set_xlabel('Time [s]')
+        ax.set_ylabel('Distance [m] ')
         plt.show()
 
 

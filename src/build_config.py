@@ -10,24 +10,24 @@ rep_id = 1                      # replication id
 
 # -- replication -- #
 replication = True
-max_clk = 36000                       # maximum simulation clock time; float or int [s]
-headway = 600                        # time headway between bus departures; float or int [s]
+max_clk = 36000                      # maximum simulation clock time; float or int [s]
+headway = 300                        # time headway between bus departures; float or int [s]
 pax_board_t = 2                      # boarding time per passenger; float or int [s]
 pax_alight_t = 2                     # alighting time per passenger; float or int [s]
-bunch_threshold = 300                # time delay for bus addition triggering; float or int [s]
-bus_addition_stops_ahead = 3         # number of stops ahead for bus addition; int []
+bunch_threshold = 100                # time delay for bus addition triggering; float or int [s]
+bus_addition_stops_ahead = 2         # number of stops ahead for bus addition; int []
 
 
 # ----- buses ----- #
 buses = True
-num_buses = 100
+num_buses = 12
 
 # uniform bus configs (simple)
 buses_uniform = True                 # True if bus building is uniform, False otherwise; bool
-num_stops = 24                       # number of stops in line from origin to end; int []
-bus_capacity = 60                    # passenger capacity of bus; int [pax]
+num_stops = 24                      # number of stops in line from origin to end; int []
+bus_capacity = 200                   # passenger capacity of bus; int [pax]
 mean_cruise_speed = 30               # mean cruise speed; float or int [km/h]
-cv_cruise_speed = 1/30               # coefficient of variation of cruise speed; float or int [] (small if no r.v.)
+cv_cruise_speed = 2/30               # coefficient of variation of cruise speed; float or int [] (small if no r.v.)
 mean_acc_rate = 1                    # mean acceleration rate; float or int [m/s^2]
 cv_acc_rate = 0.1/1                  # coefficient of variation of acceleration rate; float or int [] (small if no r.v.)
 stop_list = list(range(num_stops))   # stops list; [stop id of stop for stop in stops]
@@ -50,8 +50,8 @@ stops = True
 # uniform stop configs (simple)
 stops_uniform = True                 # True if stop building is uniform, False otherwise; bool
 num_stops = 24                       # number of stops in line from origin to end; int []
-spacing = 1000                       # spacing between stops; float or int [m]
-board_demand = 50                    # passenger demand; float or int [pax/hr]
+spacing = 100                        # spacing between stops; float or int [m]
+board_demand = 70                   # passenger demand; float or int [pax/hr]
 
 # custom stop configs (same types as above, specify by hand).
 # len of all lists must be the same.
