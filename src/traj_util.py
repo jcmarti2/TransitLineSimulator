@@ -58,7 +58,24 @@ def build_trajectories(rep_id):
 def load_trajectories(rep_id):
     pass
 
-def plot_trajectories():
+def plot_trajectories(rep_id):
     pass
 
-build_trajectories(1)
+def plot_bunching_time_loc():
+
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+
+    with open('/Users/jotaceemeeme/Desktop/GitHub/TransitLineSimulator/output/rep_output_temp.txt', 'r+') as file:
+
+        for line in file:
+            line = line.strip('\n').split(',')
+            ax.scatter(float(line[1]), float(line[0]))
+    ax.set_title('Bus Addition Triggering Scatter Plot')
+    ax.set_ylabel('Time [s]')
+    ax.set_xlabel('Distance [m] ')
+    plt.show()
+
+
+plot_bunching_time_loc()
+# build_trajectories(1)
