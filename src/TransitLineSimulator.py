@@ -1,4 +1,5 @@
 import bisect
+import matplotlib.pyplot as plt
 import numpy as np
 from collections import namedtuple
 
@@ -11,26 +12,27 @@ event_list = []
 
 class TransitLineSimulator:
 
-    def __init__(self, max_clk_s=3600, headway_s=300, num_stops=10, pax_hr=20, stop_spacing_m=1000, num_buses=8,
+    def __init__(self, max_clk_s=7600, headway_s=300, num_stops=10, pax_hr=50, stop_spacing_m=1000, num_buses=6,
                  bus_capacity=30, bus_mean_speed_kmh=30, bus_cv_speed=0.01, bus_mean_acc_ms2=5, bus_cv_acc=0.01,
-                 pax_board_s=4, pax_alight_s=4):
+                 pax_board_s=4, pax_alight_s=4, bunch_threshold_s=100):
 
-        self._max_clk_s = max_clk_s
-        self._headway_s = headway_s
+        self.max_clk_s = max_clk_s
+        self.headway_s = headway_s
 
-        self._num_stops = num_stops
-        self._pax_hr = pax_hr
-        self._stop_spacing_m = stop_spacing_m
+        self.num_stops = num_stops
+        self.pax_hr = pax_hr
+        self.stop_spacing_m = stop_spacing_m
 
-        self._num_buses = num_buses
-        self._bus_capacity = bus_capacity
-        self._bus_mean_speed_kmh = bus_mean_speed_kmh
-        self._bus_cv_speed = bus_cv_speed
-        self._bus_mean_acc_ms2 = bus_mean_acc_ms2
-        self._bus_cv_acc = bus_cv_acc
+        self.num_buses = num_buses
+        self.bus_capacity = bus_capacity
+        self.bus_mean_speed_kmh = bus_mean_speed_kmh
+        self.bus_cv_speed = bus_cv_speed
+        self.bus_mean_acc_ms2 = bus_mean_acc_ms2
+        self.bus_cv_acc = bus_cv_acc
 
-        self._pax_board_s = pax_board_s
-        self._pax_alight_s = pax_alight_s
+        self.pax_board_s = pax_board_s
+        self.pax_alight_s = pax_alight_s
+        self.bunch_threshold_s = bunch_threshold_s
 
         self.stops = []
         self._build_stops()
@@ -39,18 +41,19 @@ class TransitLineSimulator:
 
     def _build_stops(self):
 
-        for stop_id in range(self._num_stops):
-            spacing = self._stop_spacing_m
-            other_stop_ids = list(range(self._num_stops))
+        for stop_id in range(self.num_stops):
+            spacing = self.stop_spacing_m
+            other_stop_ids = list(range(self.num_stops))
             del other_stop_ids[stop_id]
-            self.stops.append(Stop(stop_id, self._pax_hr, spacing, other_stop_ids))
+            self.stops.append(Stop(stop_id, self.pax_hr, spacing, other_stop_ids))
 
     def _build_buses(self):
 
-        for bus_id in range(self._num_buses):
-            self.buses.append(Bus(bus_id, self._headway_s, self._num_stops, self._max_clk_s, self._bus_capacity,
-                                  self._bus_mean_speed_kmh, self._bus_cv_speed, self._bus_mean_acc_ms2,
-                                  self._bus_cv_acc, self.stops, self._pax_board_s, self._pax_alight_s))
+        for bus_id in range(self.num_buses):
+            self.buses.append(Bus(bus_id, self.headway_s, self.num_stops, self.max_clk_s, self.bus_capacity,
+                                  self.bus_mean_speed_kmh, self.bus_cv_speed, self.bus_mean_acc_ms2,
+                                  self.bus_cv_acc, self.stops, self.pax_board_s, self.pax_alight_s, -1,
+                                  -self.stop_spacing_m))
 
     def _initialize(self):
 
@@ -60,13 +63,13 @@ class TransitLineSimulator:
         warmup_timetable = self.buses[0].timetable  # first bus needs to cover all stops
         stop_id = 0
         for event in warmup_timetable:
-            if event[1] == 'arrival' and stop_id < self._num_stops:
-                t = event[0]
+            if event[1] == 'arrival' and stop_id < self.num_stops:
+                t = event[0] - self.headway_s
                 idx = bisect.bisect_left(t_list, t)  # bisect left because pax arrival has priority
                 t_list.insert(idx, t)
                 event_list.insert(idx, ('pax_arrival', self.stops[stop_id]))
                 stop_id += 1
-            else:
+            elif stop_id >= self.num_stops:
                 break
 
     def simulate(self):
@@ -76,28 +79,56 @@ class TransitLineSimulator:
         global event_list
 
         self._initialize()
+
+        bus_data = {bus.bus_id: {'time': [], 'dist': [], 'delay': [], 'schedule': []}
+                    for bus in self.buses if bus.timetable}
+
         while t_list and event_list:
 
-            if t_list[0] > self._max_clk_s:
+            if t_list[0] > self.max_clk_s:
                 break
 
             clk = t_list.pop(0)
             event = event_list.pop(0)
 
-            if event[0] == 'bus_arrival':
+            if event[0] == 'pax_arrival':
+                stop = event[1]
+                stop.run_pax_arrival()
+            elif event[0] == 'bus_arrival':
                 bus = event[1]
                 bus.run_arrival()
+                if bus.timetable_idx < len(bus.timetable):
+                    bus_data[bus.bus_id]['time'].append(clk)
+                    bus_data[bus.bus_id]['dist'].append(bus.travelled_dist)
+                    bus_data[bus.bus_id]['delay'].append(bus.delay)
+                    bus_data[bus.bus_id]['schedule'].append(bus.timetable[bus.timetable_idx - 1][0])
+
             elif event[0] == 'bus_departure':
                 bus = event[1]
                 bus.run_departure()
-            else:
-                stop = event[1]
-                stop.run_pax_arrival()
+                if bus.timetable_idx < len(bus.timetable):
+                    bus_data[bus.bus_id]['time'].append(clk)
+                    bus_data[bus.bus_id]['dist'].append(bus.travelled_dist)
+                    bus_data[bus.bus_id]['delay'].append(bus.delay)
+                    bus_data[bus.bus_id]['schedule'].append(bus.timetable[bus.timetable_idx - 1][0])
+
+        plt.figure()
+        for bus in bus_data:
+            if bus_data[bus]:
+                # plt.plot(bus_data[bus]['delay'])
+                plt.plot(bus_data[bus]['time'], bus_data[bus]['dist'], color='k')
+                # plt.plot(bus_data[bus]['schedule'], bus_data[bus]['dist'], color='b')
+
+        plt.ylabel('Distance [m]')
+        plt.xlabel('Time [s]')
+        plt.show()
+
 
 class Bus:
 
     def __init__(self, bus_id, headway_s, num_stops, max_clk_s, capacity, mean_speed_kmh, cv_speed,
-                 mean_acc_ms2, cv_acc, stops, pax_board_s, pax_alight_s, init_stop=0, add_bus_s=None):
+                 mean_acc_ms2, cv_acc, stops, pax_board_s, pax_alight_s, prev_stop, prev_travelled_dist,
+                 add_bus_s=None):
 
         self.bus_id = bus_id
         self.headway_s = headway_s
@@ -125,9 +156,10 @@ class Bus:
         self.stops = stops
         self.pax_board_s = pax_board_s
         self.pax_alight_s = pax_alight_s
-        self.stop_id = init_stop
+        self.stop_id = prev_stop
         if not add_bus_s:
-            self._deploy_clk_s = self.bus_id * self.headway_s
+            # first bus leaves a headway after simulation starts
+            self._deploy_clk_s = (self.bus_id + 1) * self.headway_s
         else:
             self._deploy_clk_s = add_bus_s
 
@@ -140,6 +172,7 @@ class Bus:
             self.pax_lists[stop_id] = []
         self.num_pax = 0
 
+        self.travelled_dist = prev_travelled_dist
         self.in_service = False
         self.schedule_arrival(first_stop=True)
 
@@ -148,7 +181,7 @@ class Bus:
         timetable = []
 
         t = self._deploy_clk_s
-        stop_id = self.stop_id % self.num_stops
+        stop_id = (self.stop_id + 1) % self.num_stops
 
         while True:
 
@@ -157,7 +190,7 @@ class Bus:
                 t += max((self.stops[stop_id].pax_s * self.pax_alight_s * self.headway_s),
                          (self.stops[stop_id].pax_s * self.pax_board_s * self.headway_s))
 
-            elif t < self.max_clk_s:
+            if t < self.max_clk_s:
                 timetable.append((t, 'departure', stop_id))
 
                 v = self.mean_speed_ms
@@ -195,7 +228,7 @@ class Bus:
         global t_list
         global event_list
 
-        if self.in_service or first_stop:
+        if (self.in_service or first_stop) and self.timetable_idx < len(self.timetable):
             if not first_stop:
                 v = np.random.lognormal(self._mu_speed, self._sigma_speed)
                 a = np.random.lognormal(self._mu_acc, self._sigma_acc)
@@ -212,15 +245,17 @@ class Bus:
 
         global clk
 
-        # update delay
         self.delay = max(0, clk - self.timetable[self.timetable_idx][0])
-        self.schedule_arrival()
         self.timetable_idx += 1
+        if self.timetable_idx < len(self.timetable):
+            self.schedule_arrival()
 
     def run_arrival(self):
 
         global clk
 
+        self.stop_id = (self.stop_id + 1) % self.num_stops
+        self.travelled_dist += self.stops[self.stop_id].spacing
         if self.timetable_idx == 0:
             self.in_service = True
 
@@ -242,8 +277,9 @@ class Bus:
 
         # remove the boarding passengers from the stop
         self.stops[self.stop_id].board_pax(num_pax_boarding)
-        self.schedule_departure(num_pax_alighting, num_pax_boarding)
         self.timetable_idx += 1
+        if self.timetable_idx < len(self.timetable):
+            self.schedule_departure(num_pax_boarding, num_pax_alighting)
 
     @staticmethod
     def _time_inter_stop(v, a, s):
@@ -283,7 +319,6 @@ class Stop:
         event_list.insert(idx, ('pax_arrival', self))
 
     def run_pax_arrival(self):
-
         destination = np.random.choice(self.other_stop_ids)
         self.pax.append(Pax(self.stop_id, destination))
         self.schedule_pax_arrival()  # based on current clock time
