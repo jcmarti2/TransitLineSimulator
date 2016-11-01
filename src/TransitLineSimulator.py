@@ -2,6 +2,8 @@ import bisect
 import matplotlib.pyplot as plt
 import numpy as np
 from collections import namedtuple
+import _pickle as pickle
+# import pandas as pd
 
 __author__ = 'juan carlos martinez mori'
 
@@ -12,9 +14,9 @@ event_list = []
 
 class TransitLineSimulator:
 
-    def __init__(self, max_clk_s=7600, headway_s=300, num_stops=10, pax_hr=50, stop_spacing_m=1000, num_buses=6,
-                 bus_capacity=30, bus_mean_speed_kmh=30, bus_cv_speed=0.01, bus_mean_acc_ms2=5, bus_cv_acc=0.01,
-                 pax_board_s=4, pax_alight_s=4, bunch_threshold_s=100):
+    def __init__(self, max_clk_s=3600, headway_s=360, num_stops=24, pax_hr=50, stop_spacing_m=1000, num_buses=8,
+                 bus_capacity=100, bus_mean_speed_kmh=30, bus_cv_speed=0.01, bus_mean_acc_ms2=1, bus_cv_acc=0.01,
+                 pax_board_s=4, pax_alight_s=4, bunch_threshold_s=100, pickle_file=None):
 
         self.max_clk_s = max_clk_s
         self.headway_s = headway_s
@@ -33,6 +35,8 @@ class TransitLineSimulator:
         self.pax_board_s = pax_board_s
         self.pax_alight_s = pax_alight_s
         self.bunch_threshold_s = bunch_threshold_s
+
+        self.pickle_file = pickle_file
 
         self.stops = []
         self._build_stops()
@@ -80,8 +84,16 @@ class TransitLineSimulator:
 
         self._initialize()
 
-        bus_data = {bus.bus_id: {'time': [], 'dist': [], 'delay': [], 'schedule': []}
-                    for bus in self.buses if bus.timetable}
+        try:
+            delays = pickle.load(open(self.pickle_file, "rb"))
+        except (OSError, IOError) as e:
+            delays = {}
+            pickle.dump(delays, open(self.pickle_file, 'wb'))
+            delays = pickle.load(open(self.pickle_file, 'rb'))
+
+
+        # bus_data = {bus.bus_id: {'time': [], 'dist': [], 'delay': [], 'schedule': []}
+        #             for bus in self.buses if bus.timetable}
 
         while t_list and event_list:
 
@@ -98,30 +110,44 @@ class TransitLineSimulator:
                 bus = event[1]
                 bus.run_arrival()
                 if bus.timetable_idx < len(bus.timetable):
-                    bus_data[bus.bus_id]['time'].append(clk)
-                    bus_data[bus.bus_id]['dist'].append(bus.travelled_dist)
-                    bus_data[bus.bus_id]['delay'].append(bus.delay)
-                    bus_data[bus.bus_id]['schedule'].append(bus.timetable[bus.timetable_idx - 1][0])
+                    # bus_data[bus.bus_id]['time'].append(clk)
+                    # bus_data[bus.bus_id]['dist'].append(bus.travelled_dist)
+                    # bus_data[bus.bus_id]['delay'].append(bus.delay)
+                    # bus_data[bus.bus_id]['schedule'].append(bus.timetable[bus.timetable_idx - 1][0])
+                    schedule = float('{0:.2f}'.format(bus.timetable[bus.timetable_idx - 1][0]))
+                    dist = float('{0:.2f}'.format(bus.travelled_dist))
+                    if (schedule, dist) not in delays:
+                        delays[(schedule, dist)] = []
+                    delays[(schedule, dist)].append(bus.delay)
 
             elif event[0] == 'bus_departure':
                 bus = event[1]
                 bus.run_departure()
                 if bus.timetable_idx < len(bus.timetable):
-                    bus_data[bus.bus_id]['time'].append(clk)
-                    bus_data[bus.bus_id]['dist'].append(bus.travelled_dist)
-                    bus_data[bus.bus_id]['delay'].append(bus.delay)
-                    bus_data[bus.bus_id]['schedule'].append(bus.timetable[bus.timetable_idx - 1][0])
+                    # bus_data[bus.bus_id]['time'].append(clk)
+                    # bus_data[bus.bus_id]['dist'].append(bus.travelled_dist)
+                    # bus_data[bus.bus_id]['delay'].append(bus.delay)
+                    # bus_data[bus.bus_id]['schedule'].append(bus.timetable[bus.timetable_idx - 1][0])
+                    schedule = float('{0:.2f}'.format(bus.timetable[bus.timetable_idx - 1][0]))
+                    dist = float('{0:.2f}'.format(bus.travelled_dist))
+                    if (schedule, dist) not in delays:
+                        delays[(schedule, dist)] = []
+                    delays[(schedule, dist)].append(bus.delay)
 
-        plt.figure()
-        for bus in bus_data:
-            if bus_data[bus]:
-                # plt.plot(bus_data[bus]['delay'])
-                plt.plot(bus_data[bus]['time'], bus_data[bus]['dist'], color='k')
-                # plt.plot(bus_data[bus]['schedule'], bus_data[bus]['dist'], color='b')
+        pickle.dump(delays, open(self.pickle_file, 'wb'))
 
-        plt.ylabel('Distance [m]')
-        plt.xlabel('Time [s]')
-        plt.show()
+        # plt.figure()
+        # for bus in bus_data:
+        #     if bus_data[bus]:
+        #         # plt.plot(bus_data[bus]['delay'])
+        #         plt.plot(bus_data[bus]['time'], bus_data[bus]['dist'], color='k')
+        #         plt.plot(bus_data[bus]['schedule'], bus_data[bus]['dist'], color='b')
+        #
+        # plt.ylabel('Distance [m]')
+        # plt.xlabel('Time [s]')
+        # plt.show()
+
+        # return bus_data
 
 
 class Bus:
