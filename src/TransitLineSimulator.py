@@ -1,10 +1,6 @@
 import bisect
-import matplotlib.pyplot as plt
-import copy
 import numpy as np
 from collections import namedtuple
-import _pickle as pickle
-# import pandas as pd
 
 __author__ = 'juan carlos martinez mori'
 
@@ -17,7 +13,7 @@ class TransitLineSimulator:
 
     def __init__(self, max_clk_s, num_stops, pax_hr, stop_spacing_m, num_buses, headway_s, bus_capacity,
                  bus_mean_speed_kmh, bus_cv_speed, bus_mean_acc_ms2, bus_cv_acc, pax_board_s, pax_alight_s,
-                 allow_early, slack_s, delays=None, bunch_threshold_s=False, bus_addition_list=None):
+                 allow_early, slack_s, mode, bunch_threshold_s=False, bus_addition_list=None, delay_start_s=0):
         """
         this is the constructor for the simulator class
         :param max_clk_s: maximum simulation time [s]
@@ -33,9 +29,9 @@ class TransitLineSimulator:
         :param bus_cv_acc: coefficient of variation for bus acceleration
         :param pax_board_s: boarding time per pax [s/pax]
         :param pax_alight_s: alighting time per pax [s/pax]
-        :param delays: dictionary of delays (holding data from other replications of same batch)
         :param bunch_threshold_s: threshold for bus addition
-        :param bus_addition_list: list of scheduled bus additions
+        :param bus_addition_list: list of scheduled bus additions (
+        :param delay_start_s: start time for storing delay data [s]
         """
 
         # save input data
@@ -58,14 +54,23 @@ class TransitLineSimulator:
         self.allow_early = allow_early
         self.slack_s = slack_s
 
-        self.delays = delays if delays else {}
+        self.mode = mode
+
+        # TODO: make sure required parameters are passed
+        if self.mode == 'no_insertion':
+            pass
+        elif self.mode == 'reactive':
+            pass
+        elif self.mode == 'preventive':
+            pass
+        else:
+            raise Exception('Mode not supported. Select from no_insertion, reactive or preventive')
+
+        self.delays = {}
+        self.bus_records = {}
         self.bunch_threshold_s = bunch_threshold_s
         self.bus_addition_list = bus_addition_list
-
-        if bus_addition_list:
-            self.delay_start_s = bus_addition_list[-1][0]
-        else:
-            self.delay_start_s = 0
+        self.delay_start_s = delay_start_s
 
         # store instances
         self.stops = {}
@@ -95,15 +100,56 @@ class TransitLineSimulator:
 
         # build scheduled buses
         for bus_id in range(self.num_buses):
-            self.buses[bus_id] = (Bus(bus_id, self.headway_s, self.num_stops, self.max_clk_s, self.bus_capacity,
-                                      self.bus_mean_speed_kmh, self.bus_cv_speed, self.bus_mean_acc_ms2,
-                                      self.bus_cv_acc, self.stops, self.pax_board_s, self.pax_alight_s,
-                                      self.allow_early, self.slack_s))
+            run_id = bus_id
+
+            # first bus departs one headway after simulation starts
+            deploy_clk_s = (bus_id + 1) * self.headway_s
+
+            # buses start at first stop with abs_dist of 0
+            deploy_stop_id = 0
+            deploy_abs_dist = 0
+
+            # add bus to dictionary
+            self.buses[bus_id] = (Bus(bus_id, run_id, deploy_clk_s, deploy_stop_id, deploy_abs_dist, self.headway_s,
+                                      self.num_stops, self.max_clk_s, self.bus_capacity, self.bus_mean_speed_kmh,
+                                      self.bus_cv_speed, self.bus_mean_acc_ms2, self.bus_cv_acc, self.stops,
+                                      self.pax_board_s, self.pax_alight_s, self.allow_early, self.slack_s))
+
+        # build added buses
+        if self.bus_addition_list:
+            for addition in self.bus_addition_list:
+                self._process_added_bus(addition)
+
+    def _process_added_bus(self, addition):
+        """
+        this function process a bus addition
+        :param record: entry from self.bus_addition_list (schedule_t, schedule_dist, schedule_stop_id, retired_bus_id)
+        :return:
+        """
+
+        # extract information for bus being added
+        deploy_clk_s = addition[0]
+        deploy_abs_dist = addition[1]
+        deploy_stop_id = addition[2]
+        retired_bus_id = addition[3]
+
+        # assign ids for bus being added
+        run_id = self.buses[retired_bus_id].run_id
+        bus_id = self.num_buses
+        self.num_buses += 1
+
+        # add bus to dictionary
+        self.buses[bus_id] = (Bus(bus_id, run_id, deploy_clk_s, deploy_stop_id, deploy_abs_dist, self.headway_s,
+                                  self.num_stops, self.max_clk_s, self.bus_capacity, self.bus_mean_speed_kmh,
+                                  self.bus_cv_speed, self.bus_mean_acc_ms2, self.bus_cv_acc, self.stops,
+                                  self.pax_board_s, self.pax_alight_s, self.allow_early, self.slack_s))
+
+        # set retire absolute distance for retiring bus
+        self.buses[retired_bus_id].retire_abs_dist = deploy_abs_dist
 
     def _initialize(self):
         """
         this function initializes the simulation with prevention of initial transient in pax arrival
-        it also schedules bus additions
         :return:
         """
 
@@ -129,22 +175,6 @@ class TransitLineSimulator:
             elif stop_id >= self.num_stops:
                 break
 
-        self._schedule_additions()
-
-    def _schedule_additions(self):
-        """
-        this function schedules the bus additions
-        :return:
-        """
-        global t_list
-        global event_list
-
-        if self.bus_addition_list:
-            for idx, bus_addition in enumerate(self.bus_addition_list):
-                time = bus_addition[0]
-                retiring_id = bus_addition[2]
-                self.buses[retiring_id].schedule_retirement(time)
-
     def simulate(self):
 
         global clk
@@ -153,206 +183,116 @@ class TransitLineSimulator:
 
         self._initialize()
 
-        trajs = {}
-        sched = {}
-        timetables = {}
+        # set dictionary to store trajectory and timetable data
         for bus_id in self.buses:
-            trajs[bus_id] = []
-            sched[bus_id] = []
-            timetables[bus_id] = copy.deepcopy(self.buses[bus_id].timetable)
+            # format for tuples in list is (clk, abs_dist, scheduled_t, scheduled_dist)
+            self.bus_records[bus_id] = []
 
+        # while there are scheduled events
         while t_list and event_list:
 
+            # terminate if max simulation time is exceeded
             if t_list[0] > self.max_clk_s:
                 break
 
+            # get event
             clk = t_list.pop(0)
             event = event_list.pop(0)
 
+            # run passenger arrival event
             if event[0] == 'pax_arrival':
                 stop = event[1]
                 stop.run_pax_arrival()
-            elif event[0] == 'pax_flush':
-                stop = event[1]
-                stop.run_pax_flush()
 
-            elif event[0] == 'bus_arrival':
-                bus = event[1]
-
-                # if bus.timetable != timetables[bus.bus_id]:
-                #     input('issue')
-
-                if bus.timetable_idx < len(bus.timetable) and bus.in_service:
-
-                    if bus.bus_id == 1:
-                        print('arrival at {0}'.format(clk))
-
-                    bus.run_arrival()
-
-                    schedule = float('{0:.2f}'.format(bus.timetable[bus.timetable_idx - 1][0]))
-                    dist_s = float('{0:.2f}'.format(bus.timetable[bus.timetable_idx - 1][3]))
-                    dist = float('{0:.2f}'.format(bus.travelled_dist))
-
-                    trajs[bus.bus_id].append((clk, dist))
-                    sched[bus.bus_id].append((schedule, dist_s))
-
-                    if schedule > self.delay_start_s:
-                        if (schedule, dist, bus.bus_id, bus.timetable_idx) not in self.delays:
-                            self.delays[(schedule, dist, bus.bus_id, bus.timetable_idx)] = []
-                        self.delays[(schedule, dist, bus.bus_id, bus.timetable_idx)].append(bus.delay)
-
-                    if self.bunch_threshold_s:
-
-                        if bus.delay >= self.bunch_threshold_s:
-                            trajs[bus.bus_id].append((None, None))
-                            remove_idx = None
-                            for idx, item in enumerate(event_list):
-                                if item[0] == 'bus_arrival' or item[0] == 'bus_departure':
-                                    if item[1].bus_id == bus.bus_id:
-                                        remove_idx = idx
-                                        break
-                            if remove_idx:
-                                del t_list[remove_idx]
-                                del event_list[remove_idx]
-
-                            timetable_idx = bus.timetable_idx
-                            while bus.timetable[timetable_idx][0] < clk:
-                                timetable_idx += 1
-
-                            self.buses[bus.bus_id].run_retirement(timetable_idx + 1)
-
-            elif event[0] == 'bus_departure':
+            elif event[0] == 'bus_arrival' or event[0] == 'bus_departure':
 
                 bus = event[1]
                 if bus.timetable_idx < len(bus.timetable) and bus.in_service:
+                    self._process_bus_event(bus, event[0])
 
-                    if bus.bus_id == 1:
-                        print('departure at {0}'.format(clk))
+        return self.bus_records, self.delays
 
-                    bus.run_departure()
+    def _process_bus_event(self, bus, event_type):
+        """
+        process bus event
+        :param bus: bus object
+        :param event_type: 'bus_arrival' or 'bus_departure'
+        :return:
+        """
 
-                    schedule = float('{0:.2f}'.format(bus.timetable[bus.timetable_idx - 1][0]))
-                    dist_s = float('{0:.2f}'.format(bus.timetable[bus.timetable_idx - 1][3]))
-                    dist = float('{0:.2f}'.format(bus.travelled_dist))
+        if event_type == 'bus_arrival':
+            bus.run_arrival()
+        elif event_type == 'bus_departure':
+            bus.run_departure()
 
-                    trajs[bus.bus_id].append((clk, dist))
-                    sched[bus.bus_id].append((schedule, dist_s))
+        if bus.timetable_idx < len(bus.timetable):
+            record = self._get_bus_record(bus)
+            self.bus_records[bus.bus_id].append(record)
 
-                    if schedule > self.delay_start_s:
-                        if (schedule, dist, bus.bus_id, bus.timetable_idx) not in self.delays:
-                            self.delays[(schedule, dist, bus.bus_id, bus.timetable_idx)] = []
-                        self.delays[(schedule, dist, bus.bus_id, bus.timetable_idx)].append(bus.delay)
+            # build tuple for bus addition
+            addition = tuple([record[2], record[3], bus.timetable[bus.timetable_idx][2], bus.bus_id])
 
-                    if self.bunch_threshold_s:
-                        if bus.delay >= self.bunch_threshold_s:
-                            trajs[bus.bus_id].append((None, None))
-                            remove_idx = None
-                            for idx, item in enumerate(event_list):
-                                if item[0] == 'bus_arrival' or item[0] == 'bus_departure':
-                                    if item[1].bus_id == bus.bus_id:
-                                        remove_idx = idx
-                                        break
-                            if remove_idx:
-                                del t_list[remove_idx]
-                                del event_list[remove_idx]
+            # process addition strategy
+            if self.mode == 'preventive':
 
-                            timetable_idx = bus.timetable_idx
-                            while bus.timetable[timetable_idx][0] < clk:
-                                timetable_idx += 1
+                if record[2] > self.delay_start_s:
+                    self.delays.setdefault(addition, default=[]).append(bus.delay)
 
-                            self.buses[bus.bus_id].run_retirement(timetable_idx + 1)
+            elif self.mode == 'reactive' and event_type == 'bus_departure':
 
-            elif event[0] == 'bus_retirement':
+                if bus.delay >= self.bunch_threshold_s and not bus.retire_abs_dist:
+                    self._process_added_bus(addition)
 
-                bus = event[1]
-                bus_addition = self.bus_addition_list.pop(0)
-                if bus.bus_id == 1:
-                    print('retirement at {0}'.format(clk))
+    @staticmethod
+    def _get_bus_record(bus):
+        """
+        this function formats a bus trajectory record
+        :param bus: bus object
+        :return record: tuple in format (clk, abs_dist, scheduled_t, scheduled_dist)
+        """
 
-                if bus.bus_id == bus_addition[2]:
-                    # trajs[bus.bus_id].append((None, None))
-                    timetable_idx = bus_addition[3]
+        global clk
 
-                    remove_idx = None
-                    for idx, item in enumerate(event_list):
-                        if item[0] == 'bus_arrival' or item[0] == 'bus_departure':
-                            if item[1].bus_id == bus.bus_id:
-                                remove_idx = idx
-                                break
-                    if remove_idx:
-                        del t_list[remove_idx]
-                        del event_list[remove_idx]
+        schedule_t = float('{0:.2f}'.format(bus.timetable[bus.timetable_idx][0]))
+        schedule_dist = float('{0:.2f}'.format(bus.timetable[bus.timetable_idx][3]))
+        abs_dist = float('{0:.2f}'.format(bus.abs_dist))
 
-                    flush_dt = 0
-                    # input(bus.timetable)
-                    # input(bus_addition)
-                    # print(bus.travelled_dist)
-                    # print(clk)
-                    input(bus.timetable[bus.timetable_idx])
-                    for i in range(0, timetable_idx - bus.timetable_idx):
-                        # input(bus.timetable[bus.timetable_idx + i])
-                        if bus.timetable[bus.timetable_idx + i][1] == 'departure':
-                            input('dept')
-                            stop_id = bus.timetable[bus.timetable_idx + i][2]
-                            # input(stop_id)
-                            num_pax_boarding, num_pax_alighting = bus.process_pax(stop_id=stop_id)
-                            t_board = num_pax_boarding * bus.pax_board_s  # time for all pax to alight
-                            t_alight = num_pax_alighting * bus.pax_alight_s  # time for all pax to board
+        record = tuple([clk, abs_dist, schedule_t, schedule_dist])
 
-                            if bus.allow_early:
-                                dt = max(t_board, t_alight)
-                            else:
-                                # note that departure timetable is with respect to ideal case, so no + clk is needed
-                                dt = max(t_board, t_alight, bus.timetable[bus.timetable_idx + i][0] - clk)
-
-                        else:
-                            input('arr')
-                            stop_id = bus.timetable[bus.timetable_idx + i][2]
-                            v = np.random.lognormal(bus.mu_speed, bus.sigma_speed)
-                            a = np.random.lognormal(bus.mu_acc, bus.sigma_acc)
-                            s = bus.stops[stop_id].spacing
-                            dt = bus.time_inter_stop(v, a, s)
-
-                        flush_dt += dt
-                        # input(clk + flush_dt)
-                        dist = bus.timetable[bus.timetable_idx + i][3]
-                        # input(dist)
-                        trajs[bus.bus_id].append((clk + flush_dt, dist))
-
-                    trajs[bus.bus_id].append((None, None))
-
-                    for i in range(timetable_idx - bus.timetable_idx - 1):
-                        schedule = bus.timetable[bus.timetable_idx + i][0]
-                        dist_s = bus.timetable[bus.timetable_idx + i][3]
-                        sched[bus.bus_id].append((schedule, dist_s))
-
-                    bus.run_retirement(timetable_idx)
-
-        return trajs, self.delays, sched
+        return record
 
 
 class Bus:
 
-    def __init__(self, bus_id, headway_s, num_stops, max_clk_s, capacity, mean_speed_kmh, cv_speed,
-                 mean_acc_ms2, cv_acc, stops, pax_board_s, pax_alight_s, allow_early, slack_s):
+    def __init__(self, bus_id, run_id, deploy_clk_s, deploy_stop_id, deploy_abs_dist, headway_s, num_stops, max_clk_s,
+                 capacity, mean_speed_kmh, cv_speed, mean_acc_ms2, cv_acc, stops, pax_board_s, pax_alight_s,
+                 allow_early, slack_s, retire_abs_dist=None):
         """
         constructor for the buss class
         :param bus_id: bus unique id as an integer []
+        :param run_id: run unique id as an integer []
+        :param deploy_clk_s: deploy time as an integer [s]
+        :param deploy_stop_id: deploy stop_id as an integer []
+        :param deploy_abs_dist: deploy absolute distance as float [m]
         :param headway_s: headway between buses [s]
         :param capacity: bus capacity [pax]
         :param mean_speed_kmh: mean bus cruise speed [km/h]
-        :param cv_speed: coefficient of variation for bus speed
+        :param cv_speed: coefficient of variation for bus speed []
         :param mean_acc_ms2: mean bus acceleration [m/s2]
-        :param cv_acc: coefficient of variation for bus acceleration
+        :param cv_acc: coefficient of variation for bus acceleration []
         :param pax_board_s: boarding time per pax [s/pax]
         :param pax_alight_s: alighting time per pax [s/pax]
-        :param add_bus_s: time when bus is added [s], default is None
-        :param add_bus_dist: dist where bus is added [m], default is None
-        :param add_bus_stop_id: stop id of where bus is added. default is None
+        :param allow_early: True if allow bus run early, False to stick to schedule []
+        :param slack_s: time slack at each stop as float [s]
+        :param retire_abs_dist: absolute distance at which retirement occurs [m]
         """
 
         # save input
         self.bus_id = bus_id
+        self.run_id = run_id
+        self.deploy_clk_s = deploy_clk_s
+        self.deploy_stop_id = deploy_stop_id
+        self.deploy_abs_dist = deploy_abs_dist
         self.headway_s = headway_s
         self.num_stops = num_stops
         self.max_clk_s = max_clk_s
@@ -366,19 +306,11 @@ class Bus:
         self.pax_alight_s = pax_alight_s
         self.allow_early = allow_early
         self.slack_s = slack_s
+        self.retire_abs_dist = retire_abs_dist
 
-        # lognormal random variables
-        std_speed = self.mean_speed_ms * self.cv_speed
-        # obtain mean and std of associated normal distribution for the lognormal distributions of speed using
-        # mu = log((m^2)/sqrt(v+m^2)) and sigma = sqrt(log(v/(m^2)+1))
-        self.mu_speed = np.log((self.mean_speed_ms ** 2) / np.sqrt(std_speed ** 2 + self.mean_speed_ms ** 2))
-        self.sigma_speed = np.sqrt(np.log((std_speed ** 2) / (self.mean_speed_ms ** 2) + 1))
-
-        std_acc = self.mean_acc_ms2 * self.cv_acc
-        # obtain mean and std of associated normal distribution for the lognormal distributions of acc rate using
-        # mu = log((m^2)/sqrt(v+m^2)) and sigma = sqrt(log(v/(m^2)+1))
-        self.mu_acc = np.log((self.mean_acc_ms2 ** 2) / np.sqrt(std_acc ** 2 + self.mean_acc_ms2 ** 2))
-        self.sigma_acc = np.sqrt(np.log((std_acc ** 2) / (self.mean_acc_ms2 ** 2) + 1))
+        # compute lognormal distribution parameters
+        self.mu_speed, self.sigma_speed = self.get_lognormal_mu_sigma(self.mean_speed_ms, self.cv_speed)
+        self.mu_acc, self.sigma_acc = self.get_lognormal_mu_sigma(self.mean_acc_ms2, self.cv_acc)
 
         # build pax storage
         self.pax_lists = {}
@@ -391,29 +323,27 @@ class Bus:
         self.in_service = False
 
         # set bus deployment parameters
-        # first bus leaves a headway after simulation starts
-        self.deploy_clk_s = (self.bus_id + 1) * self.headway_s
-        self.stop_id = -1
-        self.travelled_dist = - stops[0].spacing
+        self.stop_id = deploy_stop_id - 1
+        self.abs_dist = self.deploy_abs_dist - stops[self.deploy_stop_id].spacing
 
         # build timetable
-        self.timetable = self._build_timetable()
-        self.timetable_idx = 0
+        self.timetable = self.build_timetable()
+        self.timetable_idx = -1
 
         # schedule first bus arrival
         self.schedule_arrival(abs_t=self.deploy_clk_s)
 
-    def _build_timetable(self):
+    def build_timetable(self):
         """
         this function builds the bus timetable (used for delay measurement)
-        :return:
+        :return timetable: tuple containing timetable in format [(time, 'arrival' or 'departure', stop_id, dist), ...]
         """
 
         timetable = []
 
         # start at first scheduled stop
-        dist = 0
         t = self.deploy_clk_s
+        dist = self.deploy_abs_dist
         stop_id = (self.stop_id + 1) % self.num_stops
 
         while True:
@@ -431,6 +361,7 @@ class Bus:
                 t += self.slack_s
 
             if t < self.max_clk_s:
+
                 # time of departure
                 timetable.append((t, 'departure', stop_id, dist))
 
@@ -442,16 +373,18 @@ class Bus:
                 t += self.time_inter_stop(v, a, s)
                 stop_id = (stop_id + 1) % self.num_stops
                 dist += self.stops[0].spacing
+
             else:
                 break
 
         return tuple(timetable)
 
-    def schedule_departure(self, num_pax_boarding, num_pax_alighting, abs_t=None):
+    def schedule_departure(self, num_pax_boarding, num_pax_alighting):
         """
         this function schedules a bus departure
         :param num_pax_boarding: number of pax boarding bus []
         :param num_pax_alighting: number of pax alighting bus []
+        :param abs_t: absolute time for bus stop departure as a float [s]
         :return:
         """
 
@@ -460,19 +393,16 @@ class Bus:
         global event_list
 
         if (self.in_service or abs_t) and self.timetable_idx < len(self.timetable):
-            if not abs_t:
-                t_board = num_pax_boarding * self.pax_board_s  # time for all pax to alight
-                t_alight = num_pax_alighting * self.pax_alight_s  # time for all pax to board
 
-                if self.allow_early:
-                    dt = max(t_board, t_alight)
-                else:
-                    # note that departure timetable is with respect to ideal case, so no + clk is needed
-                    dt = max(t_board, t_alight, self.timetable[self.timetable_idx][0] - clk)
+            # random
+            t_board = num_pax_boarding * self.pax_board_s  # time for all pax to alight
+            t_alight = num_pax_alighting * self.pax_alight_s  # time for all pax to board
+
+            if self.allow_early:
+                dt = max(t_board, t_alight)
             else:
-                self.in_service = True
-                # on-time based on timetable
-                dt = abs_t - clk
+                # note that departure timetable is with respect to ideal case, so no + clk is needed
+                dt = max(t_board, t_alight, self.timetable[self.timetable_idx][0] - clk)
 
             idx = bisect.bisect_right(t_list, clk + dt)
             t_list.insert(idx, clk + dt)
@@ -481,7 +411,7 @@ class Bus:
     def schedule_arrival(self, abs_t=None):
         """
         this function schedules bus stop arrival
-        :param first_stop: True if first stop of bus, False is default
+        :param abs_t: absolute time for bus stop arrival as a float [s]
         :return:
         """
 
@@ -490,6 +420,7 @@ class Bus:
         global event_list
 
         if (self.in_service or abs_t) and self.timetable_idx < len(self.timetable):
+
             if not abs_t:
                 # random
                 v = np.random.lognormal(self.mu_speed, self.sigma_speed)
@@ -497,8 +428,8 @@ class Bus:
                 s = self.stops[self.stop_id].spacing
                 dt = self.time_inter_stop(v, a, s)
             else:
+                # based on abs_t
                 self.in_service = True
-                # on-time based on timetable
                 dt = abs_t - clk
 
             idx = bisect.bisect_right(t_list, clk + dt)
@@ -506,14 +437,20 @@ class Bus:
             event_list.insert(idx, ('bus_arrival', self))
 
     def run_departure(self):
+        """
+        this function runs a bus departure from a stop
+        :return:
+        """
 
         global clk
 
         # update delay
         self.delay = max(0, clk - self.timetable[self.timetable_idx][0])
 
-        # schedule next event
+        # update timetable index at end of event
         self.timetable_idx += 1
+
+        # schedule next bus arrival
         if self.timetable_idx < len(self.timetable) and self.in_service:
             self.schedule_arrival()
 
@@ -525,12 +462,9 @@ class Bus:
 
         global clk
 
+        # new stop, so increase stop id and absolute distance
         self.stop_id = (self.stop_id + 1) % self.num_stops
-        self.travelled_dist += self.stops[self.stop_id].spacing
-
-        # put bus in service if needed
-        if self.timetable_idx == 0:
-            self.in_service = True
+        self.abs_dist += self.stops[self.stop_id].spacing
 
         # update delay
         self.delay = max(0, clk - self.timetable[self.timetable_idx][0])
@@ -538,26 +472,25 @@ class Bus:
         # run pax processing
         num_pax_boarding, num_pax_alighting = self.process_pax()
 
-        # schedule next event
+        # update timetable index at end of event
         self.timetable_idx += 1
+
+        # schedule next event
         if self.timetable_idx < len(self.timetable) and self.in_service:
             self.schedule_departure(num_pax_boarding, num_pax_alighting)
 
-    def process_pax(self, stop_id=None):
+    def process_pax(self):
         """
         this function process pax boarding/alighting at a stop
-        :return num_pax_boarding: number of pax boarding the bus
-        :return num_pax_alighting: number of pax alighting the bus
+        :return num_pax_boarding: number of pax boarding the bus as integer []
+        :return num_pax_alighting: number of pax alighting the bus as integer []
         """
 
-        if not stop_id:
-            stop_id = self.stop_id
-
-        num_pax_alighting = len(self.pax_lists[stop_id])
+        num_pax_alighting = len(self.pax_lists[self.stop_id])
         self.num_pax -= num_pax_alighting
-        self.pax_lists[stop_id] = []
+        self.pax_lists[self.stop_id] = []
 
-        on_pax = self.stops[stop_id].pax
+        on_pax = self.stops[self.stop_id].pax
         num_pax_boarding = 0
         for pax in on_pax:
             if self.num_pax < self.capacity:
@@ -568,40 +501,31 @@ class Bus:
                 break
 
         # remove the boarding passengers from the stop
-        self.stops[stop_id].board_pax(num_pax_boarding)
+        self.stops[self.stop_id].board_pax(num_pax_boarding)
 
         return num_pax_boarding, num_pax_alighting
 
-    def schedule_retirement(self, abs_t):
-        """
-        this function schedules a bus retirement
-        :param abs_t: absolute simulation time for bus retirement [s]
-        :return:
-        """
-        global t_list
-        global event_list
-
-        idx = bisect.bisect_right(t_list, abs_t)
-        t_list.insert(idx, abs_t)
-        event_list.insert(idx, ('bus_retirement', self))
-
-    def run_retirement(self, timetable_idx):
+    def retire(self):
         """
         this function simply retires a bus
         :return:
         """
-
         self.in_service = False
-        self.timetable_idx = timetable_idx - 1
-        self.stop_id = self.timetable[self.timetable_idx][2]
-        self.travelled_dist = self.timetable[self.timetable_idx ][3]
 
-        if self.timetable[timetable_idx][1] == 'arrival':
-            self.schedule_arrival(abs_t=self.timetable[self.timetable_idx + 1][0])
-            # print('arrival at {0}'.format(self.timetable[timetable_idx][0]))
-        elif self.timetable[self.timetable_idx][1] == 'departure':
-            self.schedule_departure(0, 0, abs_t=self.timetable[self.timetable_idx + 1][0])
-            # print('departure at {0}'.format(self.timetable[timetable_idx][0]))
+    @staticmethod
+    def get_lognormal_mu_sigma(mean, cv):
+        """
+        this function converts a mean and coefficient of variation to mu and sigma for lognormal distribution
+        according to mu = log((m^2)/sqrt(v+m^2)) and sigma = sqrt(log(v/(m^2)+1))
+        :param mean: mean as float
+        :param cv: coefficient of variation as float
+        :return mu: as float
+        :return sigma: as float
+        """
+        std = mean * cv
+        mu = np.log((mean ** 2) / np.sqrt(std ** 2 + mean ** 2))
+        sigma = np.sqrt(np.log((std ** 2) / (mean ** 2) + 1))
+        return mu, sigma
 
     @staticmethod
     def time_inter_stop(v, a, s):
