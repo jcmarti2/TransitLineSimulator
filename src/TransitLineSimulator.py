@@ -123,7 +123,7 @@ class TransitLineSimulator:
     def _process_added_bus(self, addition):
         """
         this function process a bus addition
-        :param record: entry from self.bus_addition_list (schedule_t, schedule_dist, schedule_stop_id, retired_bus_id)
+        :param addition: entry from self.bus_addition_list (schedule_t, schedule_dist, schedule_stop_id, retired_bus_id)
         :return:
         """
 
@@ -221,27 +221,37 @@ class TransitLineSimulator:
         """
 
         if event_type == 'bus_arrival':
+
             bus.run_arrival()
+
         elif event_type == 'bus_departure':
+
+            # retire bus if needed
+            if bus.retire_abs_dist:
+                if bus.retire_abs_dist <= bus.abs_dist:
+                    bus.retire()
+
             bus.run_departure()
 
-        if bus.timetable_idx < len(bus.timetable):
+        if bus.timetable_idx < len(bus.timetable) and bus.in_service:
+
             record = self._get_bus_record(bus)
-            self.bus_records[bus.bus_id].append(record)
+            self.bus_records.setdefault(bus.bus_id, []).append(record)
 
-            # build tuple for bus addition
-            addition = tuple([record[2], record[3], bus.timetable[bus.timetable_idx][2], bus.bus_id])
+            if event_type == 'bus_arrival':
 
-            # process addition strategy
-            if self.mode == 'preventive':
+                # build tuple for bus addition
+                addition = tuple([record[2], record[3], bus.timetable[bus.timetable_idx][2], bus.bus_id])
 
-                if record[2] > self.delay_start_s:
-                    self.delays.setdefault(addition, default=[]).append(bus.delay)
+                if self.mode == 'preventive':
 
-            elif self.mode == 'reactive' and event_type == 'bus_departure':
+                    if record[2] > self.delay_start_s:
+                        self.delays[addition] = bus.delay
 
-                if bus.delay >= self.bunch_threshold_s and not bus.retire_abs_dist:
-                    self._process_added_bus(addition)
+                elif self.mode == 'reactive':
+
+                    if bus.delay >= self.bunch_threshold_s and not bus.retire_abs_dist:
+                        self._process_added_bus(addition)
 
     @staticmethod
     def _get_bus_record(bus):
@@ -323,7 +333,7 @@ class Bus:
         self.in_service = False
 
         # set bus deployment parameters
-        self.stop_id = deploy_stop_id - 1
+        self.stop_id = deploy_stop_id
         self.abs_dist = self.deploy_abs_dist - stops[self.deploy_stop_id].spacing
 
         # build timetable
@@ -392,7 +402,7 @@ class Bus:
         global t_list
         global event_list
 
-        if (self.in_service or abs_t) and self.timetable_idx < len(self.timetable):
+        if self.in_service:
 
             # random
             t_board = num_pax_boarding * self.pax_board_s  # time for all pax to alight
@@ -402,7 +412,7 @@ class Bus:
                 dt = max(t_board, t_alight)
             else:
                 # note that departure timetable is with respect to ideal case, so no + clk is needed
-                dt = max(t_board, t_alight, self.timetable[self.timetable_idx][0] - clk)
+                dt = max(t_board, t_alight, self.timetable[self.timetable_idx + 1][0] - clk)
 
             idx = bisect.bisect_right(t_list, clk + dt)
             t_list.insert(idx, clk + dt)
@@ -419,7 +429,7 @@ class Bus:
         global t_list
         global event_list
 
-        if (self.in_service or abs_t) and self.timetable_idx < len(self.timetable):
+        if self.in_service or abs_t:
 
             if not abs_t:
                 # random
@@ -444,15 +454,20 @@ class Bus:
 
         global clk
 
-        # update delay
-        self.delay = max(0, clk - self.timetable[self.timetable_idx][0])
+        if (self.timetable_idx + 1) >= len(self.timetable):
+            self.retire()
 
-        # update timetable index at end of event
-        self.timetable_idx += 1
+        if self.in_service:
 
-        # schedule next bus arrival
-        if self.timetable_idx < len(self.timetable) and self.in_service:
-            self.schedule_arrival()
+            # update delay
+            self.delay = max(0, clk - self.timetable[self.timetable_idx][0])
+
+            # update timetable index at end of event
+            self.timetable_idx += 1
+
+            # schedule next bus arrival
+            if self.timetable_idx < len(self.timetable) and self.in_service:
+                self.schedule_arrival()
 
     def run_arrival(self):
         """
@@ -462,22 +477,28 @@ class Bus:
 
         global clk
 
-        # new stop, so increase stop id and absolute distance
-        self.stop_id = (self.stop_id + 1) % self.num_stops
-        self.abs_dist += self.stops[self.stop_id].spacing
+        if (self.timetable_idx + 2) >= len(self.timetable):
+            self.retire()
 
-        # update delay
-        self.delay = max(0, clk - self.timetable[self.timetable_idx][0])
+        if self.in_service:
 
-        # run pax processing
-        num_pax_boarding, num_pax_alighting = self.process_pax()
+            # new stop, so increase stop id and absolute distance
+            self.abs_dist += self.stops[self.stop_id].spacing
 
-        # update timetable index at end of event
-        self.timetable_idx += 1
+            # update delay
+            self.delay = max(0, clk - self.timetable[self.timetable_idx][0])
 
-        # schedule next event
-        if self.timetable_idx < len(self.timetable) and self.in_service:
-            self.schedule_departure(num_pax_boarding, num_pax_alighting)
+            # run pax processing
+            num_pax_boarding, num_pax_alighting = self.process_pax()
+
+            # update timetable index at end of event
+            self.timetable_idx += 1
+
+            # schedule next event
+            if self.timetable_idx < len(self.timetable) and self.in_service:
+                self.schedule_departure(num_pax_boarding, num_pax_alighting)
+
+            self.stop_id = (self.stop_id + 1) % self.num_stops
 
     def process_pax(self):
         """
