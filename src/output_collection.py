@@ -1,84 +1,85 @@
-from TransitLineSimulator import TransitLineSimulator
+from src.TransitLineSimulator import TransitLineSimulator
+from src.sim_parameters import *
 import matplotlib.pyplot as plt
 from matplotlib import rc
 import numpy as np
+import os
+import pickle
 rc('font', **{'family': 'serif', 'serif': ['Computer Modern']})
 rc('text', usetex=True)
 
 __author__ = 'juan carlos martinez mori'
+path = os.path.dirname(os.path.abspath(__file__))
 
-num_rep = 100  # number of replications []
-max_clk_s = 14400  # maximum simulation time [s]
-run_period = 900  # period for running bus addition strategy [s]
-bunch_threshold_s = 312  # bus bunching threshold [s] (default in simulator is False)
-p_threshold = 0.5  # probability threshold for bus addition
-allow_early = False  # True if allowing for earliness, False otherwise
-slack_s = 0  # slack per stop [s]
+def simulate_no_insertion(save=False, rep_id=None, plot_traj=False, animate=False):
 
-num_stops = 24  # number of stops []
-pax_hr = 50  # pax per hour at each stop [pax/hr]
-stop_spacing_m = 1000  # spacing between stops [m]
-
-num_buses = 8  # number of buses []
-headway_s = 432.5  # headway between buses [s]
-bus_capacity = 100  # bus capacity [pax]
-bus_mean_speed_kmh = 30  # mean bus cruise speed [km/h]
-bus_cv_speed = 0.1  # coefficient of variation for bus speed
-bus_mean_acc_ms2 = 1  # mean bus acceleration [m/s2]
-bus_cv_acc = 0.1  # coefficient of variation for bus acceleration
-pax_board_s = 4  # boarding time per pax [s/pax]
-pax_alight_s = 4  # alighting time per pax [s/pax]
-
-
-def simulate_no_insertion(max_clk_s, num_stops, pax_hr, stop_spacing_m, num_buses, headway_s, bus_capacity,
-                          bus_mean_speed_kmh, bus_cv_speed, bus_mean_acc_ms2, bus_cv_acc, pax_board_s, pax_alight_s,
-                          allow_early, slack_s, plot_traj=False):
     mode = 'no_insertion'
     simulator = TransitLineSimulator(max_clk_s, num_stops, pax_hr, stop_spacing_m, num_buses, headway_s, bus_capacity,
                                      bus_mean_speed_kmh, bus_cv_speed, bus_mean_acc_ms2, bus_cv_acc, pax_board_s,
                                      pax_alight_s, allow_early, slack_s, mode)
 
     bus_records, _ = simulator.simulate()
+    metric = compute_metric(bus_records, [])
 
+    if save:
+        save_output(rep_id, bus_records, [])
     if plot_traj:
-        plot_trajectories(bus_records, 'no')
+        plot_trajectories(bus_records, 'no', metric)
+    if animate:
+        animate_trajectories(bus_records, 'no', metric)
 
 
-def simulate_reactive(max_clk_s, num_stops, pax_hr, stop_spacing_m, num_buses, headway_s, bus_capacity,
-                      bus_mean_speed_kmh, bus_cv_speed, bus_mean_acc_ms2, bus_cv_acc, pax_board_s, pax_alight_s,
-                      allow_early, slack_s, bunch_threshold_s, plot_traj=False):
+def simulate_reactive(save=False, rep_id=None, plot_traj=False, animate=False):
     mode = 'reactive'
     simulator = TransitLineSimulator(max_clk_s, num_stops, pax_hr, stop_spacing_m, num_buses, headway_s, bus_capacity,
                                      bus_mean_speed_kmh, bus_cv_speed, bus_mean_acc_ms2, bus_cv_acc, pax_board_s,
                                      pax_alight_s, allow_early, slack_s, mode, bunch_threshold_s=bunch_threshold_s)
 
     bus_records, _ = simulator.simulate()
+    metric = compute_metric(bus_records, [])
 
+    if save:
+        save_output(rep_id, bus_records, [])
     if plot_traj:
-        plot_trajectories(bus_records, mode)
+        plot_trajectories(bus_records, mode, metric)
+    if animate:
+        animate_trajectories(bus_records, mode, metric)
 
 
-def simulate_preventive(max_clk_s, num_stops, pax_hr, stop_spacing_m, num_buses, headway_s, bus_capacity,
-                        bus_mean_speed_kmh, bus_cv_speed, bus_mean_acc_ms2, bus_cv_acc, pax_board_s, pax_alight_s,
-                        allow_early, slack_s, run_period, num_rep, bunch_threshold_s, p_threshold,
-                        bus_addition_list=None, plot_traj=False):
+def simulate_preventive(save=False, rep_id=None, bus_addition_list=None, save_lists=False, plot_traj=False,
+                        animate=False, **kwargs):
+    """
+    runs simulation in preventive mode
+    :param rep_id: replication id
+    :param bus_addition_list: [(schedule_t, schedule_dist, schedule_stop_id, retired_bus_id), ...]
+    :param save_lists: True if save bus_addition_list and p_list
+    :param plot_traj: True if plot, False otherwise
+    :param animate: True if plot, False otherwise
+    :return:
+    """
 
     delay_start_s = 0
     mode = 'preventive'
-    bus_addition_list = [(3248.19, 19000.0, 20, 0), (5162.64, 29000.0, 6, 1), (6187.92, 33000.0, 10, 2), (7361.39, 38000.0, 15, 3), (7485.42, 33000.0, 10, 5), (7497.5, 36000.0, 13, 4), (8646.81, 35000.0, 12, 7), (9251.67, 42000.0, 19, 6), (10213.33, 66000.0, 20, 8), (10497.64, 65000.0, 19, 9), (11671.11, 70000.0, 0, 10), (11795.14, 65000.0, 19, 13), (12696.39, 74000.0, 4, 11), (12944.45, 64000.0, 18, 14), (13413.2, 73000.0, 3, 12)]
 
+    # compute addition list if it is not given
     if not bus_addition_list:
 
+        # initialize strategy
         cum_time = 0
         bus_addition_list = []
         p_list = []
         inserted_bus_ids = set()
 
+        # while there is a complete time window (run_period) for scheduling insertion
         while max_clk_s - cum_time > run_period:
 
+            # dictionary to hold delays of all replications
             cum_delays = {}
+
+            # max simulation time for this batch
             sim_time = cum_time + run_period
 
+            # run simulations and store output
             for _ in range(num_rep):
                 simulator = TransitLineSimulator(sim_time, num_stops, pax_hr, stop_spacing_m, num_buses, headway_s,
                                                  bus_capacity, bus_mean_speed_kmh, bus_cv_speed, bus_mean_acc_ms2,
@@ -89,9 +90,11 @@ def simulate_preventive(max_clk_s, num_stops, pax_hr, stop_spacing_m, num_buses,
                 for key in delays:
                     cum_delays.setdefault(key, []).append(delays[key])
 
-            new_addition, p, inserted_bus_ids = predict_bunching(cum_delays, bunch_threshold_s, p_threshold,
-                                                                 inserted_bus_ids)
-            print(bus_addition_list)
+            # get new insertion and update cumulative run time
+            p_t = kwargs['p_t'] if 'p_t' in kwargs else p_threshold
+            b_t = kwargs['b_t'] if 'b_t' in kwargs else bunch_threshold_s
+
+            p, new_addition = predict_bunching(cum_delays, inserted_bus_ids, p_t, b_t)
             if new_addition:
                 bus_addition_list.append(new_addition)
                 p_list.append(p)
@@ -99,44 +102,137 @@ def simulate_preventive(max_clk_s, num_stops, pax_hr, stop_spacing_m, num_buses,
             else:
                 cum_time += run_period
 
+            # delay computation for next batch starts at current cum_time
             delay_start_s = cum_time
 
+    # run a final simulation with bus_addition_list
     simulator = TransitLineSimulator(max_clk_s, num_stops, pax_hr, stop_spacing_m, num_buses, headway_s,
                                      bus_capacity, bus_mean_speed_kmh, bus_cv_speed, bus_mean_acc_ms2,
                                      bus_cv_acc, pax_board_s, pax_alight_s, allow_early, slack_s, mode,
-                                     bus_addition_list=bus_addition_list, delay_start_s=delay_start_s)
+                                     bus_addition_list=bus_addition_list, delay_start_s=0)
+
+    # obtain bus_records for trajectory
     bus_records, _ = simulator.simulate()
 
+    metric = compute_metric(bus_records, bus_addition_list)
+
+    if save_lists:
+        pass
+
     if plot_traj:
-        plot_trajectories(bus_records, mode)
+        plot_trajectories(bus_records, mode, bus_addition_list)
+
+    if animate:
+        animate(bus_records)
+
+    return metric
 
 
-def predict_bunching(cum_delays, bunch_threshold_s, p_threshold, inserted_bus_ids):
+def param_sweep_preventive(p_thresholds, bunch_thresholds):
+    """
+    sweeps over parameters p_threshold and bunch_threshold_s and stores metric
+    :param p_thresholds: list of p_threshold values with 0 < p < 1
+    :param bunch_thresholds: list of bunch_threshold_s values with bunch_threshold_s <= headway
+    :return:
+    """
 
+    # key: (p_t, b_t), value: metric
+    metrics = {}
+
+    # sweep
+    for p_t in p_thresholds:
+        for b_t in bunch_thresholds:
+
+            # obtain metric and store
+            metric = simulate_preventive(p_t=p_t, b_t=b_t)
+            metrics[(p_t, b_t)] = metric
+
+    return metrics
+
+
+def compute_metric(bus_records, bus_addition_list):
+    """
+    computes the metric (mean_speed, num_additions)
+    :param bus_records: {bus_id: (clk, abs_dist, schedule_t, schedule_dist), ...}
+    :param bus_addition_list: [(schedule_t, schedule_dist, schedule_stop_id, retired_bus_id), ...]
+    :return metric: (mean_speed, num_additions)
+    """
+
+    # store cumulative sum of x and t to apply definitions
+    sum_x = 0
+    sum_t = 0
+
+    # iterate over every bus trajectory
+    for bus_id in bus_records:
+
+        bus_record = list(zip(*bus_records[bus_id]))
+        clk = bus_record[0]
+        abs_dist = bus_record[1]
+        delta_x = abs_dist[-1] - abs_dist[0]
+        delta_t = clk[-1] - clk[0]
+
+        sum_x += delta_x
+        sum_t += delta_t
+
+    # convert units to km/h
+    mean_speed = (sum_x / sum_t) * 3.6
+
+    # get number of insertions
+    num_additions = len(bus_addition_list)
+
+    metric = tuple([mean_speed, num_additions])
+
+    return metric
+
+
+def predict_bunching(cum_delays, inserted_bus_ids, p_t, b_t):
+    """
+    computes the insertion location with maximum probability if p_threshold is satisfied
+    :param cum_delays: dict of rep delays with key (schedule_t, schedule_dist, schedule_stop_id, retired_bus_id)
+    :param inserted_bus_ids: set of inserted bus ids (cannot insert on same bus more than once)
+    :param p_t: probability threshold with 0 < pt < 1
+    :param b_t: bunching threshold with b_t <= headway
+    :return candidate: (p, key from cum_delays)
+    """
+
+    # iterate over all insertion candidates and append to (p, key) to candidate list
+    # is p_threshold is satisfied
     candidates = []
     for key in cum_delays:
-
         delay_list = cum_delays[key]
-
-        p = sum(i > bunch_threshold_s for i in delay_list) / len(delay_list)
-
-        if p >= p_threshold:
+        p = sum(i > b_t for i in delay_list) / len(delay_list)
+        if p >= p_t:
             candidates.append(tuple([p, key]))
 
+    # sort by p
     candidates.sort(key=lambda x: x[0])
+
+    # return candidate with largest p that is not in inserted_bus_ids
     for candidate in candidates:
         if candidate[1][-1] not in inserted_bus_ids:
             inserted_bus_ids.add(candidate[1][-1])
-            return candidate[1], candidate[0], inserted_bus_ids
+            return candidate
 
-    return None, None, inserted_bus_ids
+    return None
 
 
-def plot_trajectories(bus_records, mode):
+def save_output(rep_id, bus_records, bus_addition_list):
+
+    output = {'bus_records': bus_records, 'bus_addition_list': bus_addition_list}
+    filename = 'path/../rep_{0}.cpkl'.format(path, rep_id)
+    os.makedirs(os.path.dirname(filename), exist_ok=True)
+    with open(filename, 'wb') as file:
+        pickle.dump(output, file)
+
+def plot_trajectories(bus_records, mode, metric):
+    """
+    this function plots the bus trajectories
+    :param bus_records:
+    :param mode:
+    :return:
+    """
 
     plt.figure()
-    sum_x = 0
-    sum_t = 0
 
     labeled = False
 
@@ -154,24 +250,14 @@ def plot_trajectories(bus_records, mode):
             plt.plot(clk, abs_dist, 'k')
             plt.plot(schedule_t, schedule_dist, 'b', linestyle='--')
 
-        delta_x = abs_dist[-1] - abs_dist[0]
-        delta_t = clk[-1] - clk[0]
-
-        sum_x += delta_x
-        sum_t += delta_t
-
-    mean_speed = (sum_x / sum_t) * 3.6
     plt.legend(loc=2)
-    plt.title('Strategy: {0} Insertion \n Mean Commercial Speed: {1:.2f} km/h'.format(mode.title(), mean_speed))
+    plt.title('Strategy: {0} Insertion \n Mean Commercial Speed: {1:.2f} km/h'.format(mode.title(), metric[0]))
     plt.xlabel('Time [s]')
     plt.ylabel('Distance [m]')
-    plt.savefig('/Users/jotaceemeeme/Desktop/GitHub/TransitLineSimulator/output/ani_1/traj.png', dpi=600)
-    compile_animation(bus_records, mode, mean_speed, num_stops, stop_spacing_m)
-
-    # plt.show()
+    plt.show()
 
 
-def compile_animation(bus_records, mode, mean_speed, num_stops, stop_spacing_m):
+def animate_trajectories(bus_records, mode, metric, bus_addition_list=None):
 
     r = 1
     angles = np.linspace(0, 2 * np.pi, num_stops)
@@ -182,7 +268,7 @@ def compile_animation(bus_records, mode, mean_speed, num_stops, stop_spacing_m):
     for idx, loc in enumerate(locs):
         loc_dict[idx] = loc
 
-    fig, ax = plt.subplots()
+    fig, ax = plt.subplots(figsize=(7, 7))
     route = plt.Circle((0, 0), 1, color='k', fill=False)
 
     frames = []
@@ -197,47 +283,59 @@ def compile_animation(bus_records, mode, mean_speed, num_stops, stop_spacing_m):
                 frames.append([bus_id, clk, loc_dict_idx, -1])
             else:
                 frames.append([bus_id, clk, loc_dict_idx])
+    if bus_addition_list:
+        for addition in bus_addition_list:
+            frames.append([addition[3], addition[0], -2])
     frames.sort(key=lambda step: step[1])
 
-    path = '/Users/jotaceemeeme/Desktop/GitHub/TransitLineSimulator/output/ani_1'
+    path = '/Users/jotaceemeeme/Desktop/GitHub/TransitLineSimulator/output/ani_2'
 
     cur_locs = {}
+    bus_colors = {}
+    last_frame_clk = 0
+    frame_ct = 1
     for idx, frame in enumerate(frames):
+        if frame[-1] == -2:
+            bus_colors[frame[0]] = 'r'
+            continue
 
         cur_locs[frame[0]] = frame[2]
+
+        if frame[0] not in bus_colors:
+            bus_colors[frame[0]] = 'b'
+
         clk = frame[1]
         ax.cla()
 
         for bus_id in cur_locs:
             px, py = loc_dict[cur_locs[bus_id]]
-            ax.scatter(px, py, marker='s', color='g', s=100)
+            ax.scatter(px, py, marker='s', color=bus_colors[bus_id], s=100)
 
         ax.scatter(x, y, color='k', marker='o')
         ax.add_artist(route)
         ax.set_xticks([])
         ax.set_yticks([])
 
-        ax.text(0, -0.3, 'Strategy: {0} Insertion \n Mean Commercial Speed: {1:.2f} km/h \n '
+        ax.scatter([-0.12], [-0.265], marker='s', s=100, color='b')
+        ax.annotate('In Service', xy=(-0.04, -0.3))
+
+        ax.scatter([-0.12], [-0.365], marker='s', s=100, color='r')
+        ax.annotate('Out of Service', xy=(-0.04, -0.4))
+
+        ax.text(0, -0.1, 'Strategy: {0} Insertion \n Mean Commercial Speed: {1:.2f} km/h \n '
                          'Number of Buses In Line: {2} \n Clock Time: {3:.2f} s'.format(mode.title(), mean_speed,
                                                                                         len(cur_locs), clk),
                 fontsize=15, horizontalalignment='center')
 
-        fig.savefig('{0}/{1}.png'.format(path, idx), dpi=300)
+        for _ in range(int(clk) - last_frame_clk):
+            fig.savefig('{0}/{1}.png'.format(path, frame_ct), dpi=175)
+            frame_ct += 1
+        last_frame_clk = int(clk)
 
         if frame[-1] == -1:
             del cur_locs[frame[0]]
 
 
 if __name__ == '__main__':
-    # simulate_no_insertion(max_clk_s, num_stops, pax_hr, stop_spacing_m, num_buses, headway_s, bus_capacity,
-    #                       bus_mean_speed_kmh, bus_cv_speed, bus_mean_acc_ms2, bus_cv_acc, pax_board_s, pax_alight_s,
-    #                       allow_early, slack_s, plot_traj=True)
-
-    # simulate_reactive(max_clk_s, num_stops, pax_hr, stop_spacing_m, num_buses, headway_s, bus_capacity,
-    #                   bus_mean_speed_kmh, bus_cv_speed, bus_mean_acc_ms2, bus_cv_acc, pax_board_s, pax_alight_s,
-    #                   allow_early, slack_s, bunch_threshold_s, plot_traj=True)
-
-    simulate_preventive(max_clk_s, num_stops, pax_hr, stop_spacing_m, num_buses, headway_s, bus_capacity,
-                        bus_mean_speed_kmh, bus_cv_speed, bus_mean_acc_ms2, bus_cv_acc, pax_board_s, pax_alight_s,
-                        allow_early, slack_s, run_period, num_rep, bunch_threshold_s, p_threshold, plot_traj=True)
+    pass
 
