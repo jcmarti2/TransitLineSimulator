@@ -1,6 +1,5 @@
 __author__ = 'juan carlos martinez mori'
 
-num_rep = 100               # number of replications []
 max_clk_s = 14400           # maximum simulation time [s]
 run_period = 900            # period for running bus addition strategy [s]
 bunch_threshold_s = 312     # bus bunching threshold [s] (default in simulator is False)
