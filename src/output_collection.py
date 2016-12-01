@@ -11,6 +11,7 @@ rc('text', usetex=True)
 __author__ = 'juan carlos martinez mori'
 path = os.path.dirname(os.path.abspath(__file__))
 
+
 def simulate_no_insertion(save=False, rep_id=None, plot_traj=False, animate=False):
 
     mode = 'no_insertion'
@@ -22,7 +23,8 @@ def simulate_no_insertion(save=False, rep_id=None, plot_traj=False, animate=Fals
     metric = compute_metric(bus_records, [])
 
     if save:
-        save_output(rep_id, bus_records, [])
+        assert rep_id
+        save_output(rep_id, bus_records, 'no', metric, metric)
     if plot_traj:
         plot_trajectories(bus_records, 'no', metric)
     if animate:
@@ -39,7 +41,8 @@ def simulate_reactive(save=False, rep_id=None, plot_traj=False, animate=False):
     metric = compute_metric(bus_records, [])
 
     if save:
-        save_output(rep_id, bus_records, [])
+        assert rep_id
+        save_output(rep_id, bus_records, mode, metric, [])
     if plot_traj:
         plot_trajectories(bus_records, mode, metric)
     if animate:
@@ -216,13 +219,24 @@ def predict_bunching(cum_delays, inserted_bus_ids, p_t, b_t):
     return None
 
 
-def save_output(rep_id, bus_records, bus_addition_list):
+def save_output(rep_id, bus_records, mode, metric, bus_addition_list):
 
-    output = {'bus_records': bus_records, 'bus_addition_list': bus_addition_list}
-    filename = 'path/../rep_{0}.cpkl'.format(path, rep_id)
+    output = {'bus_records': bus_records, 'bus_addition_list': bus_addition_list, 'metric': metric, 'mode': mode}
+    filename = '{0}/../output/rep_{1}.cpkl'.format(path, rep_id)
     os.makedirs(os.path.dirname(filename), exist_ok=True)
     with open(filename, 'wb') as file:
         pickle.dump(output, file)
+
+
+def load_output(rep_id):
+
+    filename = '{0}/../output/rep_{1}.cpkl'.format(path, rep_id)
+    os.makedirs(os.path.dirname(filename), exist_ok=True)
+    with open(filename, 'rb') as file:
+        output = pickle.load(file)
+
+    return output
+
 
 def plot_trajectories(bus_records, mode, metric):
     """
