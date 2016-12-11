@@ -210,6 +210,10 @@ class TransitLineSimulator:
                 if bus.timetable_idx < len(bus.timetable) and bus.in_service:
                     self._process_bus_event(bus, event[0])
 
+        clk = 0.0
+        t_list = []
+        event_list = []
+
         return self.bus_records, self.delays
 
     def _process_bus_event(self, bus, event_type):
@@ -219,9 +223,9 @@ class TransitLineSimulator:
         :param event_type: 'bus_arrival' or 'bus_departure'
         :return:
         """
+        global clk
 
         if event_type == 'bus_arrival':
-
             bus.run_arrival()
 
         elif event_type == 'bus_departure':

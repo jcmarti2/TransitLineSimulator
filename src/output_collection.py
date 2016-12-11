@@ -83,9 +83,13 @@ def simulate_preventive(save_output=False, rep_id=None, plot_traj=False, save_fi
 
     mode = 'preventive'
 
-    # compute addition list if it is not given
-    bus_addition_list = get_bus_addition_list(num_reps, p_t=kwargs['p_t'], b_t=kwargs['b_t']) \
-        if not bus_addition_list else bus_addition_list
+    if not bus_addition_list:
+        # compute addition list if it is not given
+        # get new insertion and update cumulative run time
+        p_t = kwargs['p_t'] if 'p_t' in kwargs else p_threshold
+        b_t = kwargs['b_t'] if 'b_t' in kwargs else bunch_threshold_s
+
+        bus_addition_list = get_bus_addition_list(num_reps, p_t=p_t, b_t=b_t)
 
     # run a final simulation with bus_addition_list
     simulator = TransitLineSimulator(max_clk_s, num_stops, pax_hr, stop_spacing_m, num_buses, headway_s,
@@ -94,13 +98,14 @@ def simulate_preventive(save_output=False, rep_id=None, plot_traj=False, save_fi
                                      bus_addition_list=bus_addition_list, delay_start_s=0)
 
     bus_records, _ = simulator.simulate()
+
     metric = compute_metric(bus_records)
 
     allow_early_msg = 'Allow Earliness' if allow_early else 'No Earliness'
     slack_msg = 'Slack' if slack_s else 'No Slack'
     strategy = 'Preventive Insertion, {0}, {1}'.format(allow_early_msg, slack_msg)
 
-    output = {'bus_records': bus_records, 'bus_addition_list': [], 'metric': metric, 'mode': mode,
+    output = {'bus_records': bus_records, 'bus_addition_list': bus_addition_list, 'metric': metric, 'mode': mode,
               'strategy': strategy}
 
     if save_output:
@@ -115,6 +120,8 @@ def simulate_preventive(save_output=False, rep_id=None, plot_traj=False, save_fi
     if animate:
         assert rep_id
         animate_trajectories(rep_id, output)
+
+    return output
 
 
 def get_bus_addition_list(num_reps, **kwargs):
@@ -136,7 +143,7 @@ def get_bus_addition_list(num_reps, **kwargs):
 
     # while there is a complete time window (run_period) for scheduling insertion
     while max_clk_s - cum_time > run_period:
-
+        # print('Cumulative time: {0}'.format(cum_time))
         # dictionary to hold delays of all replications
         cum_delays = {}
 
@@ -149,7 +156,8 @@ def get_bus_addition_list(num_reps, **kwargs):
                                              bus_capacity, bus_mean_speed_kmh, bus_cv_speed, bus_mean_acc_ms2,
                                              bus_cv_acc, pax_board_s, pax_alight_s, allow_early, slack_s, mode,
                                              bus_addition_list=bus_addition_list, delay_start_s=delay_start_s)
-            _, delays = simulator.simulate()
+            bus_records, delays = simulator.simulate()
+            del simulator
 
             for key in delays:
                 cum_delays.setdefault(key, []).append(delays[key])
@@ -158,8 +166,11 @@ def get_bus_addition_list(num_reps, **kwargs):
         p_t = kwargs['p_t'] if 'p_t' in kwargs else p_threshold
         b_t = kwargs['b_t'] if 'b_t' in kwargs else bunch_threshold_s
 
-        p, new_addition = predict_bunching(cum_delays, inserted_bus_ids, p_t, b_t)
-        if new_addition:
+        candidate = predict_bunching(cum_delays, inserted_bus_ids, p_t, b_t)
+
+        if candidate:
+            p = candidate[0]
+            new_addition = candidate[1]
             bus_addition_list.append(new_addition)
             p_list.append(p)
             cum_time = new_addition[0]
@@ -185,18 +196,18 @@ def param_sweep_preventive(p_thresholds, bunch_thresholds, num_reps, save_sweep=
 
     # key: (p_t, b_t), value: metric
     avg_metrics = {}
-
     # sweep
     for p_t in p_thresholds:
         for b_t in bunch_thresholds:
+            print('Processing p_t: {0}, b_t: {1}'.format(p_t, b_t))
             avg_metric = compute_avg_metric(simulate_preventive, num_reps, p_t=p_t, b_t=b_t)
             avg_metrics[(p_t, b_t)] = avg_metric
 
     if save_sweep:
         filename = '{0}/../avg_metrics_{1}.cpkl'.format(path, sweep_id)
         os.makedirs(os.path.dirname(filename), exist_ok=True)
-        with open(filename, 'wb') as file:
-            pickle.dump(avg_metrics, file)
+        with open(filename, 'wb') as f:
+            pickle.dump(avg_metrics, f)
 
     return avg_metrics
 
@@ -262,11 +273,15 @@ def compute_avg_metric(function, num_reps, p_t=None, b_t=None):
     metrics = []
 
     assert (function == simulate_no_insertion or function == simulate_reactive or function == simulate_preventive)
+    if function == simulate_preventive:
+        bus_addition_list = get_bus_addition_list(num_reps, p_t=p_t, b_t=b_t)
+
     for _ in range(num_reps):
         if function == simulate_preventive:
-            output = function(p_t=p_t, b_t=b_t, num_reps=num_reps)
+            output = function(p_t=p_t, b_t=b_t, bus_addition_list=bus_addition_list)
         else:
             output = function()
+
         metric = output['metric']
         metrics.append(metric)
 
@@ -343,17 +358,20 @@ def plot_trajectories(output, rep_id=None, save_fig=False):
     # plot each trajectory
     for bus_id in bus_records:
         bus_record = list(zip(*bus_records[bus_id]))
-        clk = bus_record[0]
-        abs_dist = bus_record[1]
-        schedule_t = bus_record[2]
-        schedule_dist = bus_record[3]
-        if not labeled:
-            plt.plot(clk, abs_dist, 'k', label='Trajectory')
-            plt.plot(schedule_t, schedule_dist, 'b', linestyle='--', label='Schedule')
-            labeled = True
-        else:
-            plt.plot(clk, abs_dist, 'k')
-            plt.plot(schedule_t, schedule_dist, 'b', linestyle='--')
+        try:
+            clk = bus_record[0]
+            abs_dist = bus_record[1]
+            schedule_t = bus_record[2]
+            schedule_dist = bus_record[3]
+            if not labeled:
+                plt.plot(clk, abs_dist, 'k', label='Trajectory')
+                plt.plot(schedule_t, schedule_dist, 'b', linestyle='--', label='Schedule')
+                labeled = True
+            else:
+                plt.plot(clk, abs_dist, 'k')
+                plt.plot(schedule_t, schedule_dist, 'b', linestyle='--')
+        except IndexError:
+            pass
 
     plt.legend(loc=2)
     plt.title('Strategy: {0} \n Mean Commercial Speed: {1:.2f} km/h, No. of Buses Needed: {2}'.format(strategy,
@@ -361,10 +379,12 @@ def plot_trajectories(output, rep_id=None, save_fig=False):
                                                                                                       metric[1]))
     plt.xlabel('Time [s]', fontsize=16)
     plt.ylabel('Distance [m]', fontsize=16)
+    plt.ylim([0, 100000])
 
     if save_fig:
         filename = '{0}/../figures/rep_{1}.png'.format(path, rep_id)
         plt.savefig(filename, dpi=600)
+        plt.close("all")
         return
     plt.show()
 
