@@ -176,7 +176,7 @@ class TransitLineSimulator:
                 break
 
     def simulate(self):
-
+        # print('newrep')
         global clk
         global t_list
         global event_list
@@ -207,7 +207,7 @@ class TransitLineSimulator:
             elif event[0] == 'bus_arrival' or event[0] == 'bus_departure':
 
                 bus = event[1]
-                if bus.timetable_idx < len(bus.timetable) and bus.in_service:
+                if bus.timetable_idx < len(bus.timetable) and (bus.in_service or (not bus.in_service and bus.num_pax)):
                     self._process_bus_event(bus, event[0])
 
         clk = 0.0
@@ -237,7 +237,7 @@ class TransitLineSimulator:
 
             bus.run_departure()
 
-        if bus.timetable_idx < len(bus.timetable) and bus.in_service:
+        if bus.timetable_idx < len(bus.timetable) and (bus.in_service or (not bus.in_service and bus.num_pax)):
 
             record = self._get_bus_record(bus)
             self.bus_records.setdefault(bus.bus_id, []).append(record)
@@ -272,6 +272,12 @@ class TransitLineSimulator:
         abs_dist = float('{0:.2f}'.format(bus.abs_dist))
 
         record = tuple([clk, abs_dist, schedule_t, schedule_dist])
+
+        # if not bus.in_service:
+        #     # if bus.bus_id == 0:
+        #     #     print('timetable idx: {0}'.format(bus.timetable_idx))
+        #     #     print('num pax: {0}'.format(bus.num_pax))
+        #     #     input(record)
 
         return record
 
@@ -406,10 +412,10 @@ class Bus:
         global t_list
         global event_list
 
-        if self.in_service:
+        if self.timetable_idx < len(self.timetable) - 1:
 
             # random
-            t_board = num_pax_boarding * self.pax_board_s  # time for all pax to alight
+            t_board = num_pax_boarding * self.pax_board_s # time for all pax to alight
             t_alight = num_pax_alighting * self.pax_alight_s  # time for all pax to board
 
             if self.allow_early:
@@ -433,7 +439,7 @@ class Bus:
         global t_list
         global event_list
 
-        if self.in_service or abs_t:
+        if self.in_service or abs_t or (not self.in_service and self.num_pax):
 
             if not abs_t:
                 # random
@@ -461,7 +467,7 @@ class Bus:
         if (self.timetable_idx + 1) >= len(self.timetable):
             self.retire()
 
-        if self.in_service:
+        if self.in_service or (not self.in_service and self.num_pax):
 
             # update delay
             self.delay = max(0, clk - self.timetable[self.timetable_idx][0])
@@ -470,7 +476,7 @@ class Bus:
             self.timetable_idx += 1
 
             # schedule next bus arrival
-            if self.timetable_idx < len(self.timetable) and self.in_service:
+            if self.timetable_idx < len(self.timetable) and (self.in_service or (not self.in_service and self.num_pax)):
                 self.schedule_arrival()
 
     def run_arrival(self):
@@ -484,7 +490,7 @@ class Bus:
         if (self.timetable_idx + 2) >= len(self.timetable):
             self.retire()
 
-        if self.in_service:
+        if self.in_service or (not self.in_service and self.num_pax):
 
             # new stop, so increase stop id and absolute distance
             self.abs_dist += self.stops[self.stop_id].spacing
@@ -499,7 +505,7 @@ class Bus:
             self.timetable_idx += 1
 
             # schedule next event
-            if self.timetable_idx < len(self.timetable) and self.in_service:
+            if self.timetable_idx < len(self.timetable) and (self.in_service or (not self.in_service and self.num_pax)):
                 self.schedule_departure(num_pax_boarding, num_pax_alighting)
 
             self.stop_id = (self.stop_id + 1) % self.num_stops
@@ -515,18 +521,21 @@ class Bus:
         self.num_pax -= num_pax_alighting
         self.pax_lists[self.stop_id] = []
 
-        on_pax = self.stops[self.stop_id].pax
-        num_pax_boarding = 0
-        for pax in on_pax:
-            if self.num_pax < self.capacity:
-                num_pax_boarding += 1
-                self.num_pax += 1
-                self.pax_lists[pax.destination].append(pax)
-            else:
-                break
+        if self.in_service:
+            on_pax = self.stops[self.stop_id].pax
+            num_pax_boarding = 0
+            for pax in on_pax:
+                if self.num_pax < self.capacity:
+                    num_pax_boarding += 1
+                    self.num_pax += 1
+                    self.pax_lists[pax.destination].append(pax)
+                else:
+                    break
 
-        # remove the boarding passengers from the stop
-        self.stops[self.stop_id].board_pax(num_pax_boarding)
+            # remove the boarding passengers from the stop
+            self.stops[self.stop_id].board_pax(num_pax_boarding)
+        else:
+            num_pax_boarding = 0
 
         return num_pax_boarding, num_pax_alighting
 

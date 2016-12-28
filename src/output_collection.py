@@ -1,5 +1,5 @@
 from src.TransitLineSimulator import TransitLineSimulator
-from src.sim_parameters import *
+from src.parameters import *
 import matplotlib.pyplot as plt
 from matplotlib import rc
 import numpy as np
@@ -12,149 +12,201 @@ __author__ = 'juan carlos martinez mori'
 path = os.path.dirname(os.path.abspath(__file__))
 
 
-def simulate_no_insertion(save_output=False, rep_id=None, plot_traj=False, save_fig=False, animate=False):
+def simulate_no_insertion(disp_fig=False, save_output=False, save_fig=False, save_ani=False, rep_id=None, **kwargs):
+    """
+    simulates an uncontrolled system
+    :param disp_fig: True if display traj figure, False otherwise
+    :param save_output: True if save output pickle, False otherwise
+    :param save_fig: True if save traj figure, False otherwise
+    :param save_ani: True if save animation, False otherwise
+    :param rep_id: replication id (needed for save_output and save_fig)
+    :param kwargs: dict with possible keys from SIMULATION PARAMETERS of parameters.py
+    :return output: dict with keys 'bus_records', 'bus_addition_list', 'metric', 'mode', and 'strategy'
+    """
 
+    # replication id is needed for saving
+    if save_output or save_fig or save_ani:
+        assert rep_id
+
+    # set simulation parameters
+    m_s = kwargs['max_clk_s'] if 'max_clk_s' in kwargs else max_clk_s
+    a_e = kwargs['allow_early'] if 'allow_early' in kwargs else allow_early
+    s_s = kwargs['slack_s'] if 'slack_s' in kwargs else slack_s
+
+    # save param specific to simulation type
+    # these are based on sim_param.py
     mode = 'no_insertion'
-    simulator = TransitLineSimulator(max_clk_s, num_stops, pax_hr, stop_spacing_m, num_buses, headway_s, bus_capacity,
-                                     bus_mean_speed_kmh, bus_cv_speed, bus_mean_acc_ms2, bus_cv_acc, pax_board_s,
-                                     pax_alight_s, allow_early, slack_s, mode)
-
-    bus_records, _ = simulator.simulate()
-    metric = compute_metric(bus_records)
-
     allow_early_msg = 'Allow Earliness' if allow_early else 'No Earliness'
     slack_msg = 'Slack' if slack_s else 'No Slack'
     strategy = 'No Insertion, {0}, {1}'.format(allow_early_msg, slack_msg)
 
+    # run simulation
+    simulator = TransitLineSimulator(m_s, num_stops, pax_hr, stop_spacing_m, num_buses, headway_s, bus_capacity,
+                                     bus_mean_speed_kmh, bus_cv_speed, bus_mean_acc_ms2, bus_cv_acc, pax_board_s,
+                                     pax_alight_s, a_e, s_s, mode)
+    bus_records, _ = simulator.simulate()
+    metric = compute_metric(bus_records)
+
+    # collect output
     output = {'bus_records': bus_records, 'bus_addition_list': [], 'metric': metric, 'mode': mode,
               'strategy': strategy}
 
     if save_output:
-        assert rep_id
         save_sim_output(rep_id, output)
-    if plot_traj or save_fig:
-        if save_fig:
-            assert rep_id
-            plot_trajectories(output, rep_id=rep_id, save_fig=save_fig)
-        else:
-            plot_trajectories(output)
-    if animate:
-        assert rep_id
+    if disp_fig or save_fig:
+        plot_trajectories(output, disp_fig=disp_fig, save_fig=save_fig, rep_id=rep_id)
+    if save_ani:
         animate_trajectories(rep_id, output)
 
     return output
 
 
-def simulate_reactive(save_output=False, rep_id=None, plot_traj=False, save_fig=False, animate=False):
+def simulate_reactive(disp_fig=False, save_output=False, save_fig=False, save_ani=False, rep_id=None, **kwargs):
+    """
+    simulates a system with reactive insertion
+    :param disp_fig: True if display traj figure, False otherwise
+    :param save_output: True if save output pickle, False otherwise
+    :param save_fig: True if save traj figure, False otherwise
+    :param save_ani: True if save animation, False otherwise
+    :param rep_id: replication id (needed for save_output and save_fig)
+    :param kwargs: dict with possible keys from SIMULATION PARAMETERS of parameters.py
+    :return output: dict with keys 'bus_records', 'bus_addition_list', 'metric', 'mode', and 'strategy'
+    """
 
+    # replication id is needed for saving
+    if save_output or save_fig or save_ani:
+        assert rep_id
+
+    # set simulation parameters
+    m_s = kwargs['max_clk_s'] if 'max_clk_s' in kwargs else max_clk_s
+    a_e = kwargs['allow_early'] if 'allow_early' in kwargs else allow_early
+    s_s = kwargs['slack_s'] if 'slack_s' in kwargs else slack_s
+    b_t = kwargs['bunch_threshold_s'] if 'bunch_threshold_s' in kwargs else bunch_threshold_s
+
+    # save param specific to simulation type
+    # these are based on sim_param.py
     mode = 'reactive'
-    simulator = TransitLineSimulator(max_clk_s, num_stops, pax_hr, stop_spacing_m, num_buses, headway_s, bus_capacity,
-                                     bus_mean_speed_kmh, bus_cv_speed, bus_mean_acc_ms2, bus_cv_acc, pax_board_s,
-                                     pax_alight_s, allow_early, slack_s, mode, bunch_threshold_s=bunch_threshold_s)
-
-    bus_records, _ = simulator.simulate()
-    metric = compute_metric(bus_records)
-
     allow_early_msg = 'Allow Earliness' if allow_early else 'No Earliness'
     slack_msg = 'Slack' if slack_s else 'No Slack'
     strategy = 'Reactive Insertion, {0}, {1}'.format(allow_early_msg, slack_msg)
 
+    # run simulation
+    simulator = TransitLineSimulator(m_s, num_stops, pax_hr, stop_spacing_m, num_buses, headway_s, bus_capacity,
+                                     bus_mean_speed_kmh, bus_cv_speed, bus_mean_acc_ms2, bus_cv_acc, pax_board_s,
+                                     pax_alight_s, a_e, s_s, mode, bunch_threshold_s=b_t)
+    bus_records, _ = simulator.simulate()
+    metric = compute_metric(bus_records)
+
+    # collect output
     output = {'bus_records': bus_records, 'bus_addition_list': [], 'metric': metric, 'mode': mode,
               'strategy': strategy}
 
     if save_output:
-        assert rep_id
         save_sim_output(rep_id, output)
-    if plot_traj or save_fig:
-        if save_fig:
-            assert rep_id
-            plot_trajectories(output, rep_id=rep_id, save_fig=save_fig)
-        else:
-            plot_trajectories(output)
-    if animate:
-        assert rep_id
+    if disp_fig or save_fig:
+        plot_trajectories(output, disp_fig=disp_fig, save_fig=save_fig, rep_id=rep_id)
+    if save_ani:
         animate_trajectories(rep_id, output)
 
     return output
 
 
-def simulate_preventive(save_output=False, rep_id=None, plot_traj=False, save_fig=False, animate=False,
-                        bus_addition_list=None, num_reps=None, **kwargs):
+def simulate_preventive(disp_fig=False, save_output=False, save_fig=False, save_ani=False, rep_id=None, **kwargs):
+    """
+    simulates a system with preventive insertion
+    the strategy parameters may be specified in kwargs. they are otherwise taken from sim_param.py
+    :param disp_fig: True if display traj figure, False otherwise
+    :param save_output: True if save output pickle, False otherwise
+    :param save_fig: True if save traj figure, False otherwise
+    :param save_ani: True if save animation, False otherwise
+    :param rep_id: replication id (needed for save_output and save_fig)
+    :param kwargs: dict with possible keys from SIMULATION PARAMETERS of parameters.py
+    :return output: dict with keys 'bus_records', 'bus_addition_list', 'metric', 'mode', and 'strategy'
+    """
 
+    # replication id is needed for saving
+    if save_output or save_fig or save_ani:
+        assert rep_id
+
+    # set simulation parameters
+    m_s = kwargs['max_clk_s'] if 'max_clk_s' in kwargs else max_clk_s
+    a_e = kwargs['allow_early'] if 'allow_early' in kwargs else allow_early
+    s_s = kwargs['slack_s'] if 'slack_s' in kwargs else slack_s
+    p_t = kwargs['p_threshold'] if 'p_threshold' in kwargs else p_threshold
+    b_t = kwargs['bunch_threshold_s'] if 'bunch_threshold_s' in kwargs else bunch_threshold_s
+    n = kwargs['num_reps'] if 'num_reps' in kwargs else num_reps
+    w_s = kwargs['window_s'] if 'window_s' in kwargs else window_s
+
+    # save param specific to simulation type
+    # these are based on sim_param.py
     mode = 'preventive'
-
-    if not bus_addition_list:
-        # compute addition list if it is not given
-        # get new insertion and update cumulative run time
-        p_t = kwargs['p_t'] if 'p_t' in kwargs else p_threshold
-        b_t = kwargs['b_t'] if 'b_t' in kwargs else bunch_threshold_s
-
-        bus_addition_list = get_bus_addition_list(num_reps, p_t=p_t, b_t=b_t)
-
-    # run a final simulation with bus_addition_list
-    simulator = TransitLineSimulator(max_clk_s, num_stops, pax_hr, stop_spacing_m, num_buses, headway_s,
-                                     bus_capacity, bus_mean_speed_kmh, bus_cv_speed, bus_mean_acc_ms2,
-                                     bus_cv_acc, pax_board_s, pax_alight_s, allow_early, slack_s, mode,
-                                     bus_addition_list=bus_addition_list, delay_start_s=0)
-
-    bus_records, _ = simulator.simulate()
-
-    metric = compute_metric(bus_records)
-
     allow_early_msg = 'Allow Earliness' if allow_early else 'No Earliness'
     slack_msg = 'Slack' if slack_s else 'No Slack'
     strategy = 'Preventive Insertion, {0}, {1}'.format(allow_early_msg, slack_msg)
 
+    bus_addition_list = kwargs['bus_addition_list'] if 'bus_addition_list' in kwargs else None
+
+    # get addition list if it is not given
+    if not bus_addition_list:
+        bus_addition_list = get_bus_addition_list(m_s, a_e, s_s, p_t, b_t, n, w_s)
+
+    # run simulation
+    simulator = TransitLineSimulator(m_s, num_stops, pax_hr, stop_spacing_m, num_buses, headway_s,
+                                     bus_capacity, bus_mean_speed_kmh, bus_cv_speed, bus_mean_acc_ms2,
+                                     bus_cv_acc, pax_board_s, pax_alight_s, a_e, s_s, mode,
+                                     bus_addition_list=bus_addition_list, delay_start_s=0)
+    bus_records, _ = simulator.simulate()
+    metric = compute_metric(bus_records)
+
+    # collect output
     output = {'bus_records': bus_records, 'bus_addition_list': bus_addition_list, 'metric': metric, 'mode': mode,
               'strategy': strategy}
 
     if save_output:
-        assert rep_id
         save_sim_output(rep_id, output)
-    if plot_traj or save_fig:
-        if save_fig:
-            assert rep_id
-            plot_trajectories(output, rep_id=rep_id, save_fig=save_fig)
-        else:
-            plot_trajectories(output)
-    if animate:
-        assert rep_id
+    if disp_fig or save_fig:
+        plot_trajectories(output, disp_fig=disp_fig, save_fig=save_fig, rep_id=rep_id)
+    if save_ani:
         animate_trajectories(rep_id, output)
 
     return output
 
 
-def get_bus_addition_list(num_reps, **kwargs):
+def get_bus_addition_list(m_s, a_e, s_s, p_t, b_t, n, w_s):
     """
-    this function obtains a bus addition list based
-    :param num_reps: number of replications
-    :param kwargs: {p_t, b_t}
+    obtains a bus addition list
+    :param m_s: maximum simulation time
+    :param a_e: allow early
+    :param s_s: stop slack
+    :param p_t: probability threshold
+    :param b_t: bunching threshold
+    :param n: number of replications
+    :param w_s: optimization window
     :return:
     """
 
-    mode = 'preventive'
-
     # initialize strategy
-    delay_start_s = 0
-    cum_time = 0
-    bus_addition_list = []
-    p_list = []
-    inserted_bus_ids = set()
+    mode = 'preventive'
+    delay_start_s = 0         # time to start counting delay
+    cum_time = 0              # tracker of cumulative sim time
+    bus_addition_list = []    # tracker of addition list
+    p_list = []               # tracker of p for every addition
+    inserted_bus_ids = set()  # tracker of buses that have activated insertion
 
     # while there is a complete time window (run_period) for scheduling insertion
-    while max_clk_s - cum_time > run_period:
+    while m_s - cum_time > w_s:
         # print('Cumulative time: {0}'.format(cum_time))
         # dictionary to hold delays of all replications
         cum_delays = {}
 
         # max simulation time for this batch
-        sim_time = cum_time + run_period
+        sim_time = cum_time + w_s
 
         # run simulations and store output
-        for _ in range(num_reps):
+        for _ in range(n):
             simulator = TransitLineSimulator(sim_time, num_stops, pax_hr, stop_spacing_m, num_buses, headway_s,
                                              bus_capacity, bus_mean_speed_kmh, bus_cv_speed, bus_mean_acc_ms2,
-                                             bus_cv_acc, pax_board_s, pax_alight_s, allow_early, slack_s, mode,
+                                             bus_cv_acc, pax_board_s, pax_alight_s, a_e, s_s, mode,
                                              bus_addition_list=bus_addition_list, delay_start_s=delay_start_s)
             bus_records, delays = simulator.simulate()
             del simulator
@@ -163,8 +215,6 @@ def get_bus_addition_list(num_reps, **kwargs):
                 cum_delays.setdefault(key, []).append(delays[key])
 
         # get new insertion and update cumulative run time
-        p_t = kwargs['p_t'] if 'p_t' in kwargs else p_threshold
-        b_t = kwargs['b_t'] if 'b_t' in kwargs else bunch_threshold_s
 
         candidate = predict_bunching(cum_delays, inserted_bus_ids, p_t, b_t)
 
@@ -175,7 +225,7 @@ def get_bus_addition_list(num_reps, **kwargs):
             p_list.append(p)
             cum_time = new_addition[0]
         else:
-            cum_time += run_period
+            cum_time += w_s
 
         # delay computation for next batch starts at current cum_time
         delay_start_s = cum_time
@@ -339,12 +389,13 @@ def load_sim_output(rep_id):
     return output
 
 
-def plot_trajectories(output, rep_id=None, save_fig=False):
+def plot_trajectories(output, disp_fig=False, save_fig=False, rep_id=None):
     """
     plots bus trajectories
-    :param output: output dictionary
-    :param rep_id: replication id
-    :param save_fig: True if save fig, False otherwise
+    :param output: dict with keys 'bus_records', 'bus_addition_list', 'metric', 'mode', and 'strategy'
+    :param disp_fig: True if display traj figure, False otherwise
+    :param save_fig: True if save traj figure, False otherwise
+    :param rep_id: replication id (needed for save_fig)
     :return:
     """
 
@@ -353,7 +404,7 @@ def plot_trajectories(output, rep_id=None, save_fig=False):
     metric = output['metric']
     strategy = output['strategy']
 
-    # used for labeling traj and sched only once
+    # used for labeling trajectories and schedules only once
     labeled = False
     # plot each trajectory
     for bus_id in bus_records:
@@ -374,9 +425,8 @@ def plot_trajectories(output, rep_id=None, save_fig=False):
             pass
 
     plt.legend(loc=2)
-    plt.title('Strategy: {0} \n Mean Commercial Speed: {1:.2f} km/h, No. of Buses Needed: {2}'.format(strategy,
-                                                                                                      metric[0],
-                                                                                                      metric[1]))
+    plt.title('Strategy: {0} \n Mean Commercial Speed: {1:.2f} km/h, '
+              'No. of Buses Needed: {2}'.format(strategy, metric[0], metric[1]))
     plt.xlabel('Time [s]', fontsize=16)
     plt.ylabel('Distance [m]', fontsize=16)
     plt.ylim([0, 100000])
@@ -384,9 +434,8 @@ def plot_trajectories(output, rep_id=None, save_fig=False):
     if save_fig:
         filename = '{0}/../figures/rep_{1}.png'.format(path, rep_id)
         plt.savefig(filename, dpi=600)
-        plt.close("all")
-        return
-    plt.show()
+    if disp_fig:
+        plt.show()
 
 
 def animate_trajectories(rep_id, output):
